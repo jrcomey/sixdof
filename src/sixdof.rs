@@ -1,0 +1,715 @@
+use std::{fmt::format, mem::zeroed, vec};
+use indicatif::ProgressBar;
+use na::{Dyn, SMatrix};
+use nalgebra as na;
+use serde_json as sj;
+use sj::json;
+use serde::{Deserialize, Serialize};
+
+type State = na::SMatrix<f64, 12, 1>;
+type Inputs<const U: usize> = na::SMatrix<f64, U, 1>; 
+
+pub struct Sim {
+    objects: Vec<Box<dyn Simulatable>>,
+    start_time: f64,
+    current_time: f64,
+    end_time: f64,
+    dt: f64,
+    pub steps: u64
+}
+
+impl Sim {
+
+    pub fn new(dt: f64) -> Sim{
+        Sim { objects: vec![], start_time: 0.0, current_time: 0.0, end_time: 0.0, dt: dt, steps: 0}
+    }
+
+    pub fn update(&mut self) {
+        todo!();
+    }
+
+    pub fn get_object(&mut self, id: usize) -> &mut Box<dyn Simulatable> {
+        &mut self.objects[id]
+    }
+
+    pub fn export_current_state_to_json_str(&mut self) -> &str {
+        todo!();
+    }
+
+    pub fn run_until(&mut self, end_time: f64) {
+        self.end_time = end_time;
+        // debug!("End time is: t={} seconds", self.end_time);
+        let mut bar = ProgressBar::new((end_time / self.dt) as u64);
+        while self.current_time < self.end_time {
+            // debug!("Sim time is: {} seconds", self.current_time);
+            for i in 0..self.objects.len(){
+                let t = self.current_time;
+                self.get_object(i).integrate_to_t(t);
+                self.get_object(i).observe_position_and_rotation();
+                // println!("{}", self.get_object(i).get_state());
+            }
+            self.current_time = self.current_time + self.dt;
+            self.steps += 1;
+            bar.inc(1);
+        }
+    }
+
+    pub fn add_object(&mut self, object: Box<dyn Simulatable>) {
+        self.objects.push(object);
+    }
+
+    pub fn scene_initialization_to_datacom(&self) -> String {
+        
+        let mut json_str: String = "".to_string();
+        
+        for object in self.objects.iter() {
+            json_str.push_str(object.json_object_initialization().to_string().as_str());
+        }
+        
+        return json_str;
+    }
+
+    pub fn record_run(&self, folderpath: &str) {
+        for object in (&self.objects).into_iter() {
+            let filepath = "".to_owned() + folderpath+"/object_"+object.get_name()+".csv";
+            object.export_data(&filepath);
+        }
+    }
+}
+
+pub trait Simulatable {
+    fn get_name(&self) -> &str;
+    fn integrate_to_t(&mut self, t: f64);
+    fn observe_position_and_rotation(&mut self);
+    fn get_position(&self) -> na::Point3<f64>;
+    fn get_xdot(&self, x: &State, t: &f64) -> State;
+    fn set_position(&mut self, new_position: na::Point3<f64>);
+    fn get_rotation(&self) -> na::Point3<f64>;
+    fn set_rotation(&mut self, new_rotation: na::Point3<f64>);
+    fn get_state(&self) -> SMatrix<f64, 12, 1>;
+    fn set_state(&mut self, new_x: State);
+    fn get_component_forces(&mut self, t: f64) -> State;
+    fn json_object_initialization(&self) -> sj::Value;
+    fn status_to_json(&self) -> sj::Value;
+    fn export_data(&self, filepath: &str);
+}
+
+
+pub struct Vehicle<const U: usize> {
+    name: String,
+    id: u64,
+    mass: f64,
+    A: na::SMatrix<f64, 12, 12>,
+    B: na::SMatrix<f64, 12, U>,
+    C: na::SMatrix<f64, 6, 12>,
+    x: State,
+    u: na::SMatrix<f64, U, 1>,
+    fc: Box<dyn FlightControl<U>>,
+    position: na::Point3<f64>,
+    rotation: na::Point3<f64>,
+    last_time: f64,
+    motors: Vec<Box<dyn ComponentPart>>,
+    integrator: Integrator,
+    data: DataLogger<12, U>
+}
+
+
+impl<const U: usize> Vehicle<U> {
+    pub fn new() -> Self {
+        Vehicle { name: "".to_string(), 
+        id: 0, 
+        mass: 1.0, // kg
+        A: na::SMatrix::zeros(), 
+        B: na::SMatrix::zeros(),
+        C: na::SMatrix::zeros(),
+        x: na::SMatrix::zeros(),
+        u: na::SMatrix::zeros(),
+        fc: Box::new(NullComputer::<U>::new()), 
+        position: na::Point3::origin(), 
+        rotation: na::Point3::origin(), 
+        last_time: 0.0,
+        motors: vec![],
+        integrator: Integrator::RK4,
+        data: DataLogger::<12, U>::new(),
+     }
+    }
+
+    pub fn set_A(&mut self, A_new: na::SMatrix<f64, 12, 12>) {
+        self.A = A_new;
+    }
+
+    pub fn get_xdot_A(&self) -> State {
+        return self.A*self.x;
+    }
+
+    pub fn get_xdot_B(&self, u: na::SMatrix<f64, U, 1>) -> SMatrix<f64, 12, 1> {
+        return self.B*u;
+    }
+
+    pub fn get_u(&self) -> na::SMatrix<f64, U, 1> {
+        return self.fc.calculate_u();
+    }
+
+    pub fn get_A(&self) -> &na::SMatrix<f64, 12, 12>{
+        &self.A
+    }
+
+    pub fn get_C(&self) -> &na::SMatrix<f64, 6, 12> {
+        &self.C
+    }
+
+    pub fn set_C(&mut self, C_new: na::SMatrix<f64, 6, 12>) {
+        self.C = C_new;
+    }
+
+    pub fn load_from_json(filepath: &str) -> Vehicle<U> {
+        todo!();
+    }
+
+    pub fn load_from_json_string(json_unparsed: &str) -> Vehicle<U> {
+        todo!();
+    }
+
+    pub fn load_from_json_parsed(json_parsed: sj::Value) -> Vehicle<U> {
+        todo!();
+    }
+}
+
+impl<const T: usize> Simulatable for Vehicle<T> {
+
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+    
+    fn integrate_to_t(&mut self, t: f64) {
+        let F_gravity = self.mass * 9.81 * z_acc_down(); 
+        // debug!("Acceleration due to Gravity: {}", F_gravity);
+        let x_dot = self.get_xdot_A() + self.get_xdot_B(self.get_u());
+        // debug!("xdot: {}", x_dot);
+        let dt = t - self.last_time;
+        // self.x = self.x
+        //  + dt*(
+        //     x_dot
+        //     + F_gravity/self.mass
+        //  );
+        self.x = self.integrator.integrate(
+            |x, t| self.get_xdot(&x, &t), &self.x, &self.last_time, &t);
+        self.last_time = t;
+        self.data.record(t, self.get_state(), self.get_u())
+    }
+
+    fn get_xdot(&self, x: &State, t: &f64) -> State {
+        let F_gravity = self.mass * 9.81 * z_acc_down(); 
+        self.A*x
+            + self.B*self.u
+            + F_gravity/self.mass
+    }
+
+    fn observe_position_and_rotation(&mut self) {
+        self.position = na::Point3::new(
+            self.x[0], 
+            self.x[1], 
+            self.x[2]
+        );
+
+        self.rotation = na::Point3::new(self.x[6], self.x[7], self.x[8]);
+    }
+
+    fn get_position(&self) -> na::Point3<f64> {
+        self.position
+    }
+    
+    fn set_position(&mut self, new_position: na::Point3<f64>) {
+        self.position = new_position;
+    }
+    
+    fn get_rotation(&self) -> na::Point3<f64> {
+        self.rotation
+    }
+
+    fn set_rotation(&mut self, new_rotation: na::Point3<f64>) {
+        todo!();
+    }
+
+    fn get_state(&self) -> SMatrix<f64, 12, 1> {
+        self.x
+    }
+
+    fn set_state(&mut self, new_x: State) {
+        self.x = new_x;
+    }
+
+    fn get_component_forces(&mut self, t: f64) -> State {
+        let mut component_force_vec = na::SMatrix::<f64, 12, 1>::zeros();
+        for component in &mut self.motors {
+            component.update_to_time(vec![], t);
+            component_force_vec = component_force_vec + component.get_force_on_parent();
+        };
+
+        return component_force_vec;
+    }
+
+    fn json_object_initialization(&self) -> sj::Value {
+        let json_str = format!("{{
+            \"Id\": {:.?},
+            \"Name\": \"{}\",
+            \"Position\": [{:.?}, {:.?}, {:.?}],
+            \"Rotation\": [{:.?}, {:.?}, {:.?}],
+            \"Scale\": [1.0, 1.0, 1.0]
+            \"obj_file\": \"{}\"
+        }}",
+        self.id,
+        self.name,
+        self.position[0],
+        self.position[1],
+        self.position[2],
+        self.rotation[0],
+        self.rotation[1],
+        self.rotation[2],
+        "Default");
+
+        debug!("{}", json_str);
+
+        let json = sj::from_str(&json_str).unwrap();
+        return json;
+    }
+
+    fn status_to_json(&self) -> sj::Value {
+        let json_str = format!("
+            \"id\": {},
+            \"name\": {},
+            \"position\": [{:.?}, {:.?}, {:.?}],
+            \"rotation\": [{:.?}, {:.?}, {:.?}],
+        ",
+        self.id,
+        self.name,
+        self.position[0],
+        self.position[1],
+        self.position[2],
+        self.rotation[0],
+        self.rotation[1],
+        self.rotation[2],
+        );
+
+        let json = sj::from_str(&json_str).unwrap();
+        return json;
+
+    }
+
+    fn export_data(&self, filepath: &str) {
+        self.data.to_csv(filepath);
+    }
+}
+
+pub struct Rocket {
+    name: String,
+    mass: f64,
+    last_time: f64,
+    A: na::SMatrix<f64, 12, 12>,
+    x: State,
+    position: na::Point3<f64>,
+    rotation: na::Point3<f64>,
+    components: Vec<Box<dyn ComponentPart>>
+}
+
+impl Rocket {
+    pub fn new() -> Rocket {
+        Rocket{
+            name: "".to_string(),
+            mass: todo!(),
+            last_time: todo!(),
+            A: todo!(),
+            x: todo!(),
+            position: todo!(),
+            rotation: todo!(),
+            components: vec![]
+        }
+    }
+}
+
+impl Simulatable for Rocket {
+    fn get_name(&self) -> &str {
+        todo!()
+    }
+
+    fn integrate_to_t(&mut self, t: f64) {
+        let F_gravity = self.mass * 9.81 * z_down(); 
+        let x_dot = self.A*self.x;
+        // debug!("xdot: {}", x_dot);
+        let dt = t - self.last_time;
+        self.x = self.x
+         + x_dot*dt
+         + F_gravity/self.mass;
+        self.last_time = t;
+    }
+
+    fn observe_position_and_rotation(&mut self) {
+        self.position = na::Point3::new(self.x[0], self.x[1], self.x[2]);
+        self.rotation = na::Point3::new(self.x[6], self.x[7], self.x[8]);
+    }
+
+    fn get_xdot(&self, x: &State, t: &f64) -> State {
+        self.A*self.x
+    }
+
+    fn get_position(&self) -> na::Point3<f64> {
+        self.position
+    }
+
+    fn set_position(&mut self, new_position: na::Point3<f64>) {
+        self.position = new_position;
+    }
+
+    fn get_state(&self) -> SMatrix<f64, 12, 1> {
+        self.x
+    }
+
+    fn set_state(&mut self, new_x: State) {
+        self.x = new_x;
+    }
+
+    fn get_rotation(&self) -> na::Point3<f64> {
+        self.rotation
+    }
+
+    fn set_rotation(&mut self, new_rotation: na::Point3<f64>) {
+        self.rotation = new_rotation
+    }
+
+    fn get_component_forces(&mut self, t: f64) -> State {
+        let mut component_force_vec = na::SMatrix::<f64, 12, 1>::zeros();
+        for component in &mut self.components {
+            component.update_to_time(vec![], t);
+            component_force_vec = component_force_vec + component.get_force_on_parent();
+        };
+
+        return component_force_vec;
+    }
+
+    fn json_object_initialization(&self) -> sj::Value {
+        todo!()
+    }
+
+    fn status_to_json(&self) -> sj::Value {
+        // let json = json!(
+        //     "id": self.id
+        // )
+        todo!()
+    }
+
+    fn export_data(&self, filepath: &str) {
+        todo!();
+    }
+}
+pub struct ElectricalMotor {
+    J: f64,
+    Kv: f64,
+    Kt: f64,
+    R: f64,
+    L: f64,
+    N: f64,
+    omega: f64,
+}
+
+impl ElectricalMotor {
+    pub fn new() -> ElectricalMotor {
+        todo!();
+    }
+
+    pub fn new_from_json() -> ElectricalMotor {
+        todo!();
+    }
+
+}
+
+pub struct RocketMotor {
+    ignited: IgnitionStatus,
+    time_since_ignition: f64,
+    burn_time_vec: Vec<f64>,
+    thrust_curve: Vec<f64>
+}
+
+impl RocketMotor {
+
+    pub fn new(burn_time_vec: Vec<f64>, thrust_curve: Vec<f64>) -> RocketMotor {
+
+        RocketMotor {
+            ignited: IgnitionStatus::Ready,
+            time_since_ignition: 0.0,
+            burn_time_vec: vec![0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
+            thrust_curve: vec![1.0, 10.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 2.5, 0.0]
+        }
+    }
+}
+
+// ###################
+
+pub struct SimpleThruster {
+    time_const: f64,
+    force: f64,
+    set_force: f64,
+    last_time: f64,
+    position: na::SMatrix<f64, 3, 1>,
+    orientation: na::UnitVector3<f64>,
+    integrator: Integrator
+}
+
+impl SimpleThruster {
+
+    pub fn new() -> Self {
+        SimpleThruster {
+            time_const: 0.0001,
+            force: 0.0,
+            set_force: 0.0,
+            last_time: 0.0,
+            position: na::SMatrix::zeros(),
+            orientation: na::UnitVector3::new_unchecked(na::Vector3::new(0.0, 0.0, 1.0)),
+            integrator: Integrator::RK4
+        }
+    }
+
+    pub fn set_force(&mut self, new_force: f64) {
+        self.set_force = new_force;
+    }
+
+    pub fn get_xdot(&self, y: &na::SMatrix<f64, 1, 1>, t: &f64) -> na::SMatrix<f64, 1, 1>{
+        return (na::SMatrix::<f64, 1, 1>::new(self.force) - y)/self.time_const;
+    }
+}
+
+impl ComponentPart for SimpleThruster {
+    fn get_force_on_parent(&self) -> State {
+        let force_vec = self.force * *self.orientation;
+        let torque_vec = force_vec.cross(&self.position);
+        let force_and_torque = State::from_row_slice(&[
+            0.0, 
+            0.0,
+            0.0,
+            force_vec[0],
+            force_vec[1],
+            force_vec[2],
+            0.0,
+            0.0,
+            0.0,
+            torque_vec[0],
+            torque_vec[1],
+            torque_vec[2]
+        ]);
+        return force_and_torque;
+    }
+
+    fn update_to_time(&mut self, y: Vec<f64>, t: f64) {
+        self.integrator.integrate(|x, t| self.get_xdot(&x, &t), &na::SMatrix::<f64, 1, 1>::new(self.force), &self.last_time, &t);
+
+    }
+}
+
+enum IgnitionStatus {
+    Ready,
+    Active,
+    Spent
+}
+pub enum Status {
+    Active,
+    Inactive
+}
+
+impl Status {
+    pub fn activate() {
+        todo!()
+    }
+}
+
+pub enum Integrator {
+    ForwardEuler,
+    RK4,
+}
+
+impl Integrator {
+    pub fn integrate<F, const S: usize>(&self, f: F, y_old: &na::SMatrix<f64, S, 1>, t_last: &f64, t_new: &f64) -> SMatrix<f64, S, 1> 
+    where 
+        F: Fn(&SMatrix<f64, S, 1>, &f64) -> SMatrix<f64, S, 1>
+    {
+
+        let y_new: na::SMatrix<f64, S, 1> = match self {
+            Integrator::ForwardEuler => {
+                let h = (t_new-t_last);
+                let y_prime = f(y_old, t_new);
+                y_old + y_prime * h
+            },
+            Integrator::RK4 => {
+                let h = t_new-t_last;
+                let k1 = f(y_old, t_last);
+                let k2 = f(&(y_old+k1*h/2.0), &(t_last+h/2.0));
+                let k3 = f(&(y_old+k2*h/2.0),&(t_last+h/2.0));
+                let k4 = f(&(y_old+h*k3), &(t_last+h));
+
+                y_old + h/6.0*(k1+2.0*k2+2.0*k3+k4)
+                },
+            _ => todo!(),
+        };
+
+        return y_new;
+    }
+}
+
+pub trait ComponentPart {
+    fn update_to_time(&mut self, y: Vec<f64>, t: f64);
+    fn get_force_on_parent(&self) -> SMatrix<f64, 12, 1>;
+}
+
+fn z_down() -> State {
+    na::SMatrix::from_row_slice(&[
+        0.0,        // x
+        0.0,        // y
+        -1.0,       // z
+        0.0,        // xdot
+        0.0,        // ydot
+        0.0,        // zdot
+        0.0,        // phi
+        0.0,        // theta
+        0.0,        // psi
+        0.0,        // phidot
+        0.0,        // thetadot
+        0.0         // psidot
+    ])
+}
+
+fn z_acc_down() -> State {
+    na::SMatrix::from_row_slice(&[
+        0.0,        // xdot
+        0.0,        // ydot
+        0.0,       // zdot
+        0.0,        // xdotdot
+        0.0,        // ydotdot
+        -1.0,        // zdotdot
+        0.0,        // phidot
+        0.0,        // thetadot
+        0.0,        // psidot
+        0.0,        // phidotdot
+        0.0,        // thetadotdot
+        0.0         // psidotdot
+    ])
+}
+
+fn forward_matrix(dt: f64) -> SMatrix<f64, 12, 12> {
+    na::SMatrix::<f64, 12, 12>::from_row_slice(&[
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+    ])
+}
+
+
+// #####################
+pub struct Sensor {
+    null: u64,
+}
+
+pub struct FlightComputer<const U: usize> {
+    sample_time: f64,
+    t_last_updated: f64,
+    sensors: Vec<Sensor>,
+    cmd_inputs: Inputs<U>,
+
+}
+
+pub trait FlightControl<const U: usize> {
+    fn estimate_state(&mut self, actual_state: State) -> State;
+    fn calculate_u(&self) -> Inputs<U>;
+}
+
+pub struct NullComputer<const U: usize> {
+    inputs: Inputs<U>,
+}
+
+impl<const U: usize> NullComputer<U> {
+    pub fn new() -> NullComputer<U> {
+        NullComputer{
+            inputs: Inputs::<U>::zeros()
+        }
+    }
+}
+
+impl<const U: usize> FlightControl<U> for NullComputer<U> {
+    
+    fn estimate_state(&mut self, actual_state: State) -> State {
+        return State::zeros();
+    }
+
+    fn calculate_u(&self) -> Inputs<U> {
+        return Inputs::<U>::zeros();
+    }
+}
+
+// #####################
+
+
+pub struct DataLogger<const S: usize, const U: usize> {
+    time_vector: Vec<f64>,
+    state_vector: Vec<na::SMatrix<f64, S, 1>>,
+    input_vector: Vec<Inputs<U>>
+}
+
+impl<const S: usize, const U:usize> DataLogger<S, U> {
+
+    pub fn new() -> Self {
+        DataLogger{
+            time_vector: vec![],
+            state_vector: vec![],
+            input_vector: vec![]
+        }
+    }
+
+    pub fn record(&mut self, time: f64, state: na::SMatrix<f64, S, 1>, input: Inputs<U>) {
+        self.time_vector.push(time);
+        self.state_vector.push(state);
+        self.input_vector.push(input);
+
+    }
+
+    pub fn to_csv(&self, filepath: &str) {
+        // Setup
+        let mut csv: String = "time, x_pos, y_pos, z_pos, x_vel, y_vel, z_vel, pitch, roll, yaw, pitch_vel, roll_vel, yaw_vel".to_string();
+        for i in (&self.input_vector[0]) {
+            csv.push_str(&format!(",U_{}", i));
+        }
+        csv.push_str("\n");
+
+        // Iterate over all datapoints
+        for (i, _) in self.time_vector.iter().enumerate() {
+            let mut local_str = "".to_string();
+            local_str = local_str + &format!("{:?}", self.time_vector[i]); // Time
+            for state_el in (&self.state_vector[i]).into_iter() {
+                local_str.push_str(&format!(",{:?}", state_el));
+            }
+
+            for input in (&self.input_vector[i]).into_iter() {
+                local_str.push_str(&format!(",{:?}", input));
+            }
+            local_str.push_str("\n");
+            csv.push_str(&local_str);
+        }
+
+        // Write to file
+        debug!("{}", filepath);
+        std::fs::write(filepath, csv).unwrap();
+ 
+    }
+
+    pub fn how_many_steps(&self) -> u64 {
+        self.time_vector.len() as u64
+    }
+} 

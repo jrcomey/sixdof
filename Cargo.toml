@@ -1,0 +1,12 @@
+[package]
+name = "sixdof"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+indicatif = "0.17.8"
+log = "0.4.21"
+nalgebra = "0.33.0"
+pretty_env_logger = "0.5.0"
+serde = "1.0.203"
+serde_json = "1.0.1"
