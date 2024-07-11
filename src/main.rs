@@ -1,3 +1,14 @@
+/*  TODO:
+    // Indicates completed
+    - Flight Computer and electronics
+        - Basic stabilizing flight computer
+        - Betaflight duplicate
+        - 
+
+
+*/
+
+
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -19,6 +30,7 @@ use crate::sixdof::Simulatable;
 extern crate serde_json as sj;
 extern crate serde;
 extern crate indicatif;
+mod setup;
 fn main() {
     let t_start = std::time::Instant::now();
     std::env::set_var("RUST_LOG", "trace");                                 // Initialize logger
@@ -26,51 +38,8 @@ fn main() {
     info!("Program Start!");
 
     let mut sim = sixdof::Sim::new(1.0E-3);
-    let mut drone = Box::new(sixdof::Vehicle::<8>::new());
-    let A_new = na::SMatrix::<f64, 12, 12>::from_row_slice(&[
-        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    ]);
-    let state_new = na::SMatrix::<f64, 12, 1>::from_row_slice(&[
-        0.0,    // x
-        0.0,    // y
-        0.0,    // z
-        0.0,    // xdot
-        0.0,    // ydot
-        0.0,    // zdot
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0
-    ]);
-    let C_new = na::SMatrix::<f64, 6, 12>::from_row_slice(&[
-        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
-    ]);
-    // A[0, 0] = 1./0;
-
-    drone.set_A(
-        A_new
-    );
-
-    // let Rocket = Box::new(sixdof::Rocket::new());
-    drone.set_state(state_new);
+    
+    let mut drone = setup::test_falling_object();
     sim.add_object(drone);
     sim.run_until(10.0);
     // println!("{}", sim.scene_initialization_to_datacom());
