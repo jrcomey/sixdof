@@ -137,8 +137,8 @@ impl<const U: usize> Vehicle<U> {
      }
     }
 
-    pub fn set_A(&mut self, A_new: na::SMatrix<f64, 12, 12>) {
-        self.A = A_new;
+    pub fn set_mass(&mut self, new_mass:f64) {
+        self.mass = new_mass;
     }
 
     pub fn get_xdot_A(&self) -> State {
@@ -149,12 +149,24 @@ impl<const U: usize> Vehicle<U> {
         return self.B*u;
     }
 
-    pub fn get_u(&self) -> na::SMatrix<f64, U, 1> {
-        return self.fc.calculate_u();
+    pub fn get_u(&self, current_state: State) -> na::SMatrix<f64, U, 1> {
+        return self.fc.calculate_u(current_state);
     }
 
     pub fn get_A(&self) -> &na::SMatrix<f64, 12, 12>{
         &self.A
+    }
+
+    pub fn set_A(&mut self, A_new: na::SMatrix<f64, 12, 12>) {
+        self.A = A_new;
+    }
+
+    pub fn get_B(&self) -> &na::SMatrix<f64, 12, U>{
+        &self.B
+    }
+
+    pub fn set_B(&mut self, B_new: na::SMatrix<f64, 12, U>) {
+        self.B = B_new;
     }
 
     pub fn get_C(&self) -> &na::SMatrix<f64, 6, 12> {
@@ -191,7 +203,8 @@ impl<const U: usize> Simulatable for Vehicle<U> {
     fn integrate_to_t(&mut self, t: f64) {
         let F_gravity = self.mass * 9.81 * z_acc_down(); 
         // debug!("Acceleration due to Gravity: {}", F_gravity);
-        let x_dot = self.get_xdot_A() + self.get_xdot_B(self.get_u());
+        // let x_dot = self.get_xdot_A() + self.get_xdot_B(self.get_u(self.x));
+        // debug!("U: {}", self.get_xdot_B(self.get_u(self.x)));
         // debug!("xdot: {}", x_dot);
         let dt = t - self.last_time;
         // self.x = self.x
@@ -202,13 +215,13 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.x = self.integrator.integrate(
             |x, t| self.get_xdot(&x, &t), &self.x, &self.last_time, &t);
         self.last_time = t;
-        self.data.record(t, self.get_state(), self.get_u())
+        self.data.record(t, self.get_state(), self.get_u(self.x))
     }
 
     fn get_xdot(&self, x: &State, t: &f64) -> State {
         let F_gravity = self.mass * 9.81 * z_acc_down(); 
         self.A*x
-            + self.B*self.u
+            + self.B*self.get_u(*x)
             + F_gravity/self.mass
     }
 
@@ -461,7 +474,7 @@ impl RocketMotor {
 
 // ###################
 
-pub struct SimpleThruster {
+pub struct IdealThruster {
     time_const: f64,
     force: f64,
     set_force: f64,
@@ -471,10 +484,10 @@ pub struct SimpleThruster {
     integrator: Integrator
 }
 
-impl SimpleThruster {
+impl IdealThruster {
 
     pub fn new() -> Self {
-        SimpleThruster {
+        IdealThruster {
             time_const: 0.0001,
             force: 0.0,
             set_force: 0.0,
@@ -494,7 +507,7 @@ impl SimpleThruster {
     }
 }
 
-impl ComponentPart for SimpleThruster {
+impl ComponentPart for IdealThruster {
     fn get_force_on_parent(&self) -> State {
         let force_vec = self.force * *self.orientation;
         let torque_vec = force_vec.cross(&self.position);
@@ -516,8 +529,11 @@ impl ComponentPart for SimpleThruster {
     }
 
     fn update_to_time(&mut self, y: Vec<f64>, t: f64) {
-        self.integrator.integrate(|x, t| self.get_xdot(&x, &t), &na::SMatrix::<f64, 1, 1>::new(self.force), &self.last_time, &t);
+        self.force = self.set_force;
+    }
 
+    fn set_force(&mut self, new_force: f64) {
+        self.set_force = new_force;
     }
 }
 
@@ -573,6 +589,7 @@ impl Integrator {
 pub trait ComponentPart {
     fn update_to_time(&mut self, y: Vec<f64>, t: f64);
     fn get_force_on_parent(&self) -> SMatrix<f64, 12, 1>;
+    fn set_force(&mut self, new_force:f64);
 }
 
 fn z_down() -> State {
@@ -635,28 +652,45 @@ pub struct Sensor {
     null: u64,
 }
 
+impl Sensor {
+    pub fn sense(&self, vehicle_state: State) -> State {
+        return vehicle_state;
+    }
+}
+
 pub struct FlightComputer<const U: usize> {
     sample_time: f64,
     t_last_updated: f64,
     sensors: Vec<Sensor>,
     cmd_inputs: Inputs<U>,
-    P: f64,
+    K: na::SMatrix<f64, U, 12>,
 }
 
 pub trait FlightControl<const U: usize> {
     fn estimate_state(&mut self, actual_state: State) -> State;
-    fn calculate_u(&self) -> Inputs<U>;
+    fn calculate_u(&self, current_state: State) -> Inputs<U>;
 }
 
 impl<const U: usize> FlightComputer<U> {
-    pub fn new(sample_time: f64, sensors: Vec<Sensor>, P: f64) -> FlightComputer<U> {
+    pub fn new(sample_time: f64, sensors: Vec<Sensor>, K: na::SMatrix<f64, U, 12>) -> FlightComputer<U> {
         FlightComputer {
             sample_time: sample_time,
             t_last_updated: 0.0,
             sensors: sensors,
             cmd_inputs: Inputs::zeros(),
-            P: 1.0
+            K: K
         }
+    }
+}
+
+impl<const U: usize> FlightControl<U> for FlightComputer<U> {
+    fn estimate_state(&mut self, actual_state: State) -> State {
+        return actual_state;
+    }
+
+    fn calculate_u(&self, current_state: State) -> Inputs<U> {
+        debug!("{}", self.K*current_state);
+        self.K*current_state
     }
 }
 
@@ -678,7 +712,7 @@ impl<const U: usize> FlightControl<U> for NullComputer<U> {
         return State::zeros();
     }
 
-    fn calculate_u(&self) -> Inputs<U> {
+    fn calculate_u(&self, current_state: State) -> Inputs<U> {
         return Inputs::<U>::zeros();
     }
 }

@@ -39,9 +39,9 @@ fn main() {
 
     let mut sim = sixdof::Sim::new(1.0E-3);
     
-    let mut drone = setup::test_falling_object();
+    let mut drone = setup::blizzard_model();
     sim.add_object(drone);
-    sim.run_until(10.0);
+    sim.run_until(0.1);
     // println!("{}", sim.scene_initialization_to_datacom());
     info!("Program End!");
     info!("Final Position: {}", sim.get_object(0).get_position());
@@ -168,8 +168,15 @@ mod tests {
     }
 
     #[test]
-    fn test_3() {
-        ;
+    fn uncontrolled_position_input() {
+        let mut sim = sixdof::Sim::new(1.0E-3);
+        let drone = setup::non_falling_obect();
+        sim.add_object(drone);
+        let t = 10.0;
+        sim.run_until(t);
+        let final_position = sim.get_object(0).get_position()[2];
+        let final_unassisted = (1.0/2.0) * t*t * (-9.81);
+        assert!(final_position > 0.5*final_unassisted);
     }
 
 }
