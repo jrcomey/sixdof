@@ -1,14 +1,15 @@
+use std::u64;
 use std::{fmt::format, mem::zeroed, vec};
 use indicatif::ProgressBar;
 use na::{Dyn, SMatrix};
 use nalgebra as na;
-use serde_json as sj;
-use sj::json;
-use serde::{Deserialize, Serialize};
-
+use serde::{Serialize, Deserialize};
+use serde_json::{json, Value};
+use crate::datatypes::{State, Inputs};
+use crate::{fc::*, graphical};
+use crate::graphical::*;
 // use crate::components;
-type State = na::SMatrix<f64, 12, 1>;
-type Inputs<const U: usize> = na::SMatrix<f64, U, 1>; 
+
 
 pub struct Sim {
     objects: Vec<Box<dyn Simulatable>>,
@@ -16,13 +17,23 @@ pub struct Sim {
     current_time: f64,
     end_time: f64,
     dt: f64,
-    pub steps: u64
+    pub steps: u64,
+    is_gui: bool,
+    datacom_port: String,
+
 }
 
 impl Sim {
 
     pub fn new(dt: f64) -> Sim{
-        Sim { objects: vec![], start_time: 0.0, current_time: 0.0, end_time: 0.0, dt: dt, steps: 0}
+        Sim { 
+            objects: vec![], 
+            start_time: 0.0, 
+            current_time: 0.0, 
+            end_time: 0.0, 
+            dt: dt, 
+            steps: 0,
+            ..Default::default()}
     }
 
     pub fn update(&mut self) {
@@ -39,15 +50,27 @@ impl Sim {
 
     pub fn run_until(&mut self, end_time: f64) {
         self.end_time = end_time;
-        // debug!("End time is: t={} seconds", self.end_time);
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
         while self.current_time < self.end_time {
-            // debug!("Sim time is: {} seconds", self.current_time);
             for i in 0..self.objects.len(){
+                // Advance to next time step t_n+1, and iterate over each object to 
                 let t = self.current_time;
                 self.get_object(i).integrate_to_t(t);
                 self.get_object(i).observe_position_and_rotation();
                 // println!("{}", self.get_object(i).get_state());
+            }
+
+
+            let graphical_step = todo!();
+            if graphical_step {
+                for i in 0..self.objects.len() {
+                    // Collect list of commands to send
+                }
+
+                // Create thread and send to DATACOM
+                // std::thread::spawn(f){|| {
+
+                // }};
             }
             self.current_time = self.current_time + self.dt;
             self.steps += 1;
@@ -76,6 +99,44 @@ impl Sim {
             object.export_data(&filepath);
         }
     }
+
+    pub fn load_scenario(folderpath: &str) {
+        todo!();
+    }
+
+    pub fn add_datacom_port(&mut self, new_port: String) {
+        self.datacom_port = new_port;
+    }
+
+    pub fn initialize_datacom(&mut self) {
+        if self.is_gui {
+
+            let mut objects: Vec<serde_json::Value> = vec![];
+            for i in 0..self.objects.len(){
+                let temp = self.get_object(i).datacom_json_initialize();
+                // match &temp {
+                //     Some(Value) => objects.push(temp.expect("You shouldn't see this! ")),
+                //     _ => (),
+                // }
+            }
+        }
+    }
+}
+
+impl Default for Sim {
+    fn default() -> Self {
+        Sim {
+            objects: vec![], 
+            start_time: 0.0, 
+            current_time: 0.0, 
+            end_time: 0.0, 
+            dt: 1.0E-3, 
+            steps: 0,
+            is_gui: false,
+            datacom_port: "".to_string(),
+        }
+    }
+    
 }
 
 pub trait Simulatable {
@@ -94,9 +155,10 @@ pub trait Simulatable {
     fn status_to_json(&self) -> sj::Value;
     fn export_data(&self, filepath: &str);
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>);
+    // fn test();
+    fn datacom_json_initialize(&self) -> serde_json::Value;
     // fn add_flight_controller(&self, new_fc: Box<dyn FlightControl<U>>)
 }
-
 
 pub struct Vehicle<const U: usize> {
     name: String,
@@ -113,13 +175,15 @@ pub struct Vehicle<const U: usize> {
     last_time: f64,
     motors: Vec<Box<dyn ComponentPart>>,
     integrator: Integrator,
-    data: DataLogger<12, U>
+    data: DataLogger<12, U>,
+    is_graphical: bool,
+    obj_file: Option<WireframeObject>,
 }
 
 
 impl<const U: usize> Vehicle<U> {
     pub fn new() -> Self {
-        Vehicle { name: "".to_string(), 
+        Vehicle{ name: "".to_string(), 
         id: 0, 
         mass: 1.0, // kg
         A: na::SMatrix::zeros(), 
@@ -134,6 +198,8 @@ impl<const U: usize> Vehicle<U> {
         motors: vec![],
         integrator: Integrator::RK4,
         data: DataLogger::<12, U>::new(),
+        is_graphical: true,
+        ..Default::default()
      }
     }
 
@@ -150,7 +216,8 @@ impl<const U: usize> Vehicle<U> {
     }
 
     pub fn get_u(&self, current_state: State) -> na::SMatrix<f64, U, 1> {
-        return self.fc.calculate_u(current_state);
+
+        return self.fc.calculate_u(current_state)
     }
 
     pub fn get_A(&self) -> &na::SMatrix<f64, 12, 12>{
@@ -324,11 +391,57 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.motors.push(new_component);
     }
 
+    fn datacom_json_initialize(&self) -> sj::Value {
+
+        // if self.is_graphical {
+        //     let json_file = json!({"A": 0.0});
+        // }
+        // if self.is_graphical {
+        //     let json_file: Value = serde_json::json!({
+        //         "A": 0,
+        //     });
+        // }
+        // else {
+        //     let json_file = Option::None;
+        // }
+
+        // let json: Value = 
+        return sj::Value::Bool(false);
+    }
+
     // fn add_flight_controller(&self, new_fc: Box<dyn FlightControl<U>>) {
 
     // }
 }
 
+impl<const U: usize> Default for Vehicle<U> {
+    fn default() -> Self {
+        Vehicle {
+            name: "DEFAULT".to_string(),
+            id: u64::MAX,
+            mass: 0.0,
+            A: na::SMatrix::zeros(),
+            B: na::SMatrix::zeros(),
+            C: na::SMatrix::zeros(),
+            x: na::SMatrix::zeros(),
+            u: na::SMatrix::zeros(),
+            fc: Box::new(NullComputer::new()),
+            position: na::Point3::<f64>::origin(),
+            rotation: na::Point3::<f64>::origin(),
+            last_time: -1.0,
+            motors: vec![],
+            integrator: Integrator::ForwardEuler,
+            data: DataLogger::<12, U>::new(),
+            is_graphical: false,
+            obj_file: Option::None,
+        }
+    }
+}
+pub enum PhysicsType {
+    Static,
+    StaticTrajectory,
+    StateSpace,
+}
 // pub struct Rocket {
 //     name: String,
 //     mass: f64,
@@ -646,76 +759,6 @@ fn forward_matrix(dt: f64) -> SMatrix<f64, 12, 12> {
     ])
 }
 
-
-// #####################
-pub struct Sensor {
-    null: u64,
-}
-
-impl Sensor {
-    pub fn sense(&self, vehicle_state: State) -> State {
-        return vehicle_state;
-    }
-}
-
-pub struct FlightComputer<const U: usize> {
-    sample_time: f64,
-    t_last_updated: f64,
-    sensors: Vec<Sensor>,
-    cmd_inputs: Inputs<U>,
-    K: na::SMatrix<f64, U, 12>,
-}
-
-pub trait FlightControl<const U: usize> {
-    fn estimate_state(&mut self, actual_state: State) -> State;
-    fn calculate_u(&self, current_state: State) -> Inputs<U>;
-}
-
-impl<const U: usize> FlightComputer<U> {
-    pub fn new(sample_time: f64, sensors: Vec<Sensor>, K: na::SMatrix<f64, U, 12>) -> FlightComputer<U> {
-        FlightComputer {
-            sample_time: sample_time,
-            t_last_updated: 0.0,
-            sensors: sensors,
-            cmd_inputs: Inputs::zeros(),
-            K: K
-        }
-    }
-}
-
-impl<const U: usize> FlightControl<U> for FlightComputer<U> {
-    fn estimate_state(&mut self, actual_state: State) -> State {
-        return actual_state;
-    }
-
-    fn calculate_u(&self, current_state: State) -> Inputs<U> {
-        debug!("{}", self.K*current_state);
-        self.K*current_state
-    }
-}
-
-pub struct NullComputer<const U: usize> {
-    inputs: Inputs<U>,
-}
-
-impl<const U: usize> NullComputer<U> {
-    pub fn new() -> NullComputer<U> {
-        NullComputer{
-            inputs: Inputs::<U>::zeros()
-        }
-    }
-}
-
-impl<const U: usize> FlightControl<U> for NullComputer<U> {
-    
-    fn estimate_state(&mut self, actual_state: State) -> State {
-        return State::zeros();
-    }
-
-    fn calculate_u(&self, current_state: State) -> Inputs<U> {
-        return Inputs::<U>::zeros();
-    }
-}
 
 // #####################
 
