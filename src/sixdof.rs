@@ -1,14 +1,18 @@
+use core::num;
+use std::fmt::Error;
 use std::u64;
 use std::{fmt::format, mem::zeroed, vec};
 use indicatif::ProgressBar;
 use na::{Dyn, SMatrix};
 use nalgebra as na;
+use serde::de::value;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use crate::datatypes::{State, Inputs};
 use crate::{fc::*, graphical};
 use crate::graphical::*;
-// use crate::components;
+use std::net::TcpStream;
+use std::io::{Read, Write};
 
 
 pub struct Sim {
@@ -20,7 +24,7 @@ pub struct Sim {
     pub steps: u64,
     is_gui: bool,
     datacom_port: String,
-
+    frame_counter_update: u64,
 }
 
 impl Sim {
@@ -51,6 +55,7 @@ impl Sim {
     pub fn run_until(&mut self, end_time: f64) {
         self.end_time = end_time;
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
+        let mut graphical_frame_counter: u64 = 0;
         while self.current_time < self.end_time {
             for i in 0..self.objects.len(){
                 // Advance to next time step t_n+1, and iterate over each object to 
@@ -61,16 +66,13 @@ impl Sim {
             }
 
 
-            let graphical_step = todo!();
-            if graphical_step {
-                for i in 0..self.objects.len() {
-                    // Collect list of commands to send
-                }
-
-                // Create thread and send to DATACOM
-                // std::thread::spawn(f){|| {
-
-                // }};
+            
+            if graphical_frame_counter >= self.frame_counter_update {
+                self.datacom_update_packet();
+                graphical_frame_counter = 0;
+            }
+            else {
+                graphical_frame_counter += 1;
             }
             self.current_time = self.current_time + self.dt;
             self.steps += 1;
@@ -108,18 +110,97 @@ impl Sim {
         self.datacom_port = new_port;
     }
 
-    pub fn initialize_datacom(&mut self) {
-        if self.is_gui {
-
-            let mut objects: Vec<serde_json::Value> = vec![];
+    pub fn initialize_datacom_json(&mut self) -> Value {
+            let mut entities: Vec<serde_json::Value> = vec![];
             for i in 0..self.objects.len(){
                 let temp = self.get_object(i).datacom_json_initialize();
-                // match &temp {
-                //     Some(Value) => objects.push(temp.expect("You shouldn't see this! ")),
-                //     _ => (),
-                // }
+                match &temp {
+                    Some(Value) => entities.push(temp.expect("You shouldn't see this! ")),
+                    _ => (),
+                }
+            }
+
+            let datacom_packet = json!({
+                "entities": entities
+            });
+
+            debug!("{}", datacom_packet.to_string());
+            return datacom_packet;
+    }
+
+    pub fn datacom_update_packet(&mut self) -> Vec<Value> {
+            let mut commands: Vec<Value> = vec![];
+            for i in 0..self.objects.len(){
+                let temp = self.get_object(i).datacom_json_command_step();
+                match &temp {
+                    Some(Value) => {
+                        let mut temp2 = temp.expect("You shouldn't see this");
+                        commands.append(&mut temp2)},
+                    _ => ()
+                }
+            }
+            debug!("{}", json!(commands).to_string());
+            return commands;
+    }
+
+    pub fn datacom_send_packet(&self, addr: &str, data: &str) -> Result<(), Error> {
+
+        let max_connection_attempts = 10;
+        let mut num_attempts = 0;
+        while max_connection_attempts > num_attempts {
+            debug!("Connection attempt {}", num_attempts+1);
+            let connection_result = TcpStream::connect(addr);
+
+
+            match &connection_result {
+                Ok(_) => {
+                    debug!("Established connection. Transmitting data...");
+                    let mut stream = connection_result.unwrap();
+                    stream.write_all(&data.as_bytes()).unwrap();
+                    debug!("Successfully transmitted packet");
+                    return Ok(());
+                },
+                Err(_) => {
+                    debug!("Connection attempt failed");
+                    num_attempts+=1;
+                }
             }
         }
+
+        
+        error!("Connection attempt timed out.");
+        Err(Error)
+    }
+
+    pub fn datacom_start(&mut self, datacom_addr: &str) -> Result<(), Error> {
+        // Set relevant data flags
+        self.is_gui = true;
+
+        // Generate initial data JSON and attempt to connect to DATACOM
+        info!("Attempting to send initialization packet.");
+        let initialization_packet = self.initialize_datacom_json();
+        self.datacom_send_packet(datacom_addr, &initialization_packet.to_string())?;
+
+        // Retrieve and send model files      
+        
+
+        Ok(())
+    }
+
+    pub fn get_unique_model_names(&mut self) -> Result<Vec<String>, Error> {
+        let mut unique_model_paths: Vec<String> = vec![];
+        for i in 0..self.objects.len() {
+            let model_name = &self.get_object(i).get_model_path();
+            
+            if unique_model_paths.iter().any(|e| model_name.contains(e)) && model_name == &"" {
+                debug!("{} already in model names", model_name);
+            }
+            else {
+                unique_model_paths.push(model_name.to_string());
+            }
+        }
+
+        Ok(unique_model_paths)
     }
 }
 
@@ -132,8 +213,9 @@ impl Default for Sim {
             end_time: 0.0, 
             dt: 1.0E-3, 
             steps: 0,
-            is_gui: false,
+            is_gui: true,
             datacom_port: "".to_string(),
+            frame_counter_update: 100,
         }
     }
     
@@ -156,7 +238,9 @@ pub trait Simulatable {
     fn export_data(&self, filepath: &str);
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>);
     // fn test();
-    fn datacom_json_initialize(&self) -> serde_json::Value;
+    fn datacom_json_initialize(&self) -> Option<serde_json::Value>;
+    fn datacom_json_command_step(&self) -> Option<Vec<Value>>;
+    fn get_model_path(&self) -> &str;
     // fn add_flight_controller(&self, new_fc: Box<dyn FlightControl<U>>)
 }
 
@@ -177,7 +261,7 @@ pub struct Vehicle<const U: usize> {
     integrator: Integrator,
     data: DataLogger<12, U>,
     is_graphical: bool,
-    obj_file: Option<WireframeObject>,
+    obj_file: String,
 }
 
 
@@ -258,6 +342,25 @@ impl<const U: usize> Vehicle<U> {
 
     pub fn add_flight_controller(&mut self, new_fc: Box<dyn FlightControl<U>>) {
         self.fc = new_fc;
+    }
+
+    pub fn datacom_position_command(&self) -> Value {
+        let pos_cmd = json!({
+            "targetEntityID": self.id,
+            "commandType": "",
+            "data": get_point_as_list(self.position),
+        });
+        return pos_cmd;
+    }
+
+    pub fn datacom_rotation_command(&self) -> Value {
+        let rot_cmd = json!({
+            "targetEntityID": self.id,
+            "commandType": "",
+            "data": get_point_as_list(self.rotation),
+        });
+
+        return rot_cmd
     }
 }
 
@@ -391,27 +494,40 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.motors.push(new_component);
     }
 
-    fn datacom_json_initialize(&self) -> sj::Value {
-
-        // if self.is_graphical {
-        //     let json_file = json!({"A": 0.0});
-        // }
-        // if self.is_graphical {
-        //     let json_file: Value = serde_json::json!({
-        //         "A": 0,
-        //     });
-        // }
-        // else {
-        //     let json_file = Option::None;
-        // }
+    fn datacom_json_initialize(&self) -> Option<sj::Value> {
+        let json_file = if self.is_graphical {
+            Option::Some(json!({
+                "Name": self.name,
+                "id": self.id,
+                "Position": [self.position[0], self.position[1], self.position[2]],
+                "Rotation": [self.rotation[0], self.rotation[1], self.rotation[2]],
+            }))
+        }
+        
+        else {
+            Option::None
+        };
 
         // let json: Value = 
-        return sj::Value::Bool(false);
+        return json_file;
     }
 
     // fn add_flight_controller(&self, new_fc: Box<dyn FlightControl<U>>) {
 
     // }
+
+    fn datacom_json_command_step(&self) -> Option<Vec<Value>> {
+        let mut cmd_vec = vec![];
+        cmd_vec.push(self.datacom_position_command());
+        cmd_vec.push(self.datacom_rotation_command());
+        // Add behavior to push subcomponent commands here as well
+
+        return Option::Some(cmd_vec);
+    }
+
+    fn get_model_path(&self) -> &str {
+        &self.obj_file
+    }
 }
 
 impl<const U: usize> Default for Vehicle<U> {
@@ -432,8 +548,8 @@ impl<const U: usize> Default for Vehicle<U> {
             motors: vec![],
             integrator: Integrator::ForwardEuler,
             data: DataLogger::<12, U>::new(),
-            is_graphical: false,
-            obj_file: Option::None,
+            is_graphical: true,
+            obj_file: "DEFAULT".to_string(),
         }
     }
 }
@@ -819,3 +935,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
         self.time_vector.len() as u64
     }
 } 
+
+fn get_point_as_list(point: na::Point3<f64>) -> [f64; 3] {
+    return [point[0], point [1], point[2]];
+}
