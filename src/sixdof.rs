@@ -181,6 +181,7 @@ impl Sim {
     pub fn datacom_start(&mut self, datacom_addr: &str) -> Result<(), Error> {
         // Set relevant data flags
         self.is_gui = true;
+        self.add_datacom_port(self.datacom_port.to_string());
 
         // Generate initial data JSON and attempt to connect to DATACOM
         info!("Attempting to send initialization packet.");
