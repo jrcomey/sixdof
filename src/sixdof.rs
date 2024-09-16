@@ -52,7 +52,7 @@ impl Sim {
         todo!();
     }
 
-    pub fn run_until(&mut self, end_time: f64) {
+    pub fn run_until(&mut self, end_time: f64) -> Result<(), Error>{
         self.end_time = end_time;
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
         let mut graphical_frame_counter: u64 = 0;
@@ -66,18 +66,24 @@ impl Sim {
             }
 
 
-            
-            if graphical_frame_counter >= self.frame_counter_update {
-                self.datacom_update_packet();
-                graphical_frame_counter = 0;
-            }
-            else {
-                graphical_frame_counter += 1;
+            // If it's a graphical step, generate an update packet and send it over network.
+            // Only try this if the sim is supposed to be graphical.
+            if self.is_gui {
+                if graphical_frame_counter >= self.frame_counter_update {
+                    let packet = self.datacom_update_packet();
+                    self.datacom_send_packet(&self.datacom_port, &packet)?;
+                    graphical_frame_counter = 0;
+                }
+                else {
+                    graphical_frame_counter += 1;
+                }
             }
             self.current_time = self.current_time + self.dt;
             self.steps += 1;
             bar.inc(1);
         }
+
+        Ok(())
     }
 
     pub fn add_object(&mut self, object: Box<dyn Simulatable>) {
@@ -128,7 +134,7 @@ impl Sim {
             return datacom_packet;
     }
 
-    pub fn datacom_update_packet(&mut self) -> Vec<Value> {
+    pub fn datacom_update_packet(&mut self) -> String {
             let mut commands: Vec<Value> = vec![];
             for i in 0..self.objects.len(){
                 let temp = self.get_object(i).datacom_json_command_step();
@@ -140,7 +146,7 @@ impl Sim {
                 }
             }
             debug!("{}", json!(commands).to_string());
-            return commands;
+            return json!(commands).to_string();
     }
 
     pub fn datacom_send_packet(&self, addr: &str, data: &str) -> Result<(), Error> {
@@ -182,7 +188,12 @@ impl Sim {
         self.datacom_send_packet(datacom_addr, &initialization_packet.to_string())?;
 
         // Retrieve and send model files      
-        
+        let unique_model_names = self.get_unique_model_names()?;
+        for i in unique_model_names.into_iter() {
+            let file = std::fs::read_to_string(i).expect("Failed to read file!");
+            self.datacom_send_packet(datacom_addr, file.as_str())?;
+        }
+
 
         Ok(())
     }
