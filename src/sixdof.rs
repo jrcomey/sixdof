@@ -9,11 +9,11 @@ use serde::de::value;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use crate::datatypes::{State, Inputs};
-use crate::{fc::*, graphical};
-use crate::graphical::*;
+use crate::{fc::*};
+// use crate::graphical::*;
 use std::net::TcpStream;
 use std::io::{Read, Write};
-
+use crate::graphical::{self, GraphicalData};
 
 pub struct Sim {
     objects: Vec<Box<dyn Simulatable>>,
@@ -127,6 +127,7 @@ impl Sim {
             }
 
             let datacom_packet = json!({
+                "viewports": [],
                 "entities": entities
             });
 
@@ -184,16 +185,16 @@ impl Sim {
         self.add_datacom_port(self.datacom_port.to_string());
 
         // Generate initial data JSON and attempt to connect to DATACOM
-        info!("Attempting to send initialization packet.");
         let initialization_packet = self.initialize_datacom_json();
         self.datacom_send_packet(datacom_addr, &initialization_packet.to_string())?;
-
+        info!("Initialization packet transmitted.");
         // Retrieve and send model files      
         let unique_model_names = self.get_unique_model_names()?;
         for i in unique_model_names.into_iter() {
             let file = std::fs::read_to_string(i).expect("Failed to read file!");
             self.datacom_send_packet(datacom_addr, file.as_str())?;
         }
+        info!("Models transmitted.");
 
 
         Ok(())
@@ -249,11 +250,9 @@ pub trait Simulatable {
     fn status_to_json(&self) -> sj::Value;
     fn export_data(&self, filepath: &str);
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>);
-    // fn test();
-    fn datacom_json_initialize(&self) -> Option<serde_json::Value>;
+    fn datacom_json_initialize(&mut self) -> Option<serde_json::Value>;
     fn datacom_json_command_step(&self) -> Option<Vec<Value>>;
     fn get_model_path(&self) -> &str;
-    // fn add_flight_controller(&self, new_fc: Box<dyn FlightControl<U>>)
 }
 
 pub struct Vehicle<const U: usize> {
@@ -274,6 +273,7 @@ pub struct Vehicle<const U: usize> {
     data: DataLogger<12, U>,
     is_graphical: bool,
     obj_file: String,
+    graphical_info: graphical::GraphicalData,
 }
 
 
@@ -373,6 +373,10 @@ impl<const U: usize> Vehicle<U> {
         });
 
         return rot_cmd
+    }
+
+    pub fn get_component(&mut self, id: usize) -> &mut Box<dyn ComponentPart> {
+        &mut self.motors[id]
     }
 }
 
@@ -506,22 +510,34 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.motors.push(new_component);
     }
 
-    fn datacom_json_initialize(&self) -> Option<sj::Value> {
-        let json_file = if self.is_graphical {
-            Option::Some(json!({
+    fn datacom_json_initialize(&mut self) -> Option<sj::Value> {
+        if self.is_graphical {
+            // Generate list of models to put into 
+            let mut model_list: Vec<Value> = vec![];
+            let top_level_model = self.graphical_info.get_model_value();
+            model_list.push(top_level_model);
+            for i in 0..self.motors.len() {
+                let temp = self.get_component(i).datacom_get_model_json();
+                model_list.push(temp);
+            }
+            
+            let json_file = Option::Some(json!({
                 "Name": self.name,
                 "id": self.id,
+                "Scale": [1.0, 1.0, 1.0],
                 "Position": [self.position[0], self.position[1], self.position[2]],
                 "Rotation": [self.rotation[0], self.rotation[1], self.rotation[2]],
-            }))
+                "Models": model_list,
+            }));
+            return json_file
+            
         }
         
         else {
-            Option::None
+            return Option::None;
         };
 
         // let json: Value = 
-        return json_file;
     }
 
     // fn add_flight_controller(&self, new_fc: Box<dyn FlightControl<U>>) {
@@ -562,6 +578,7 @@ impl<const U: usize> Default for Vehicle<U> {
             data: DataLogger::<12, U>::new(),
             is_graphical: true,
             obj_file: "DEFAULT".to_string(),
+            graphical_info: graphical::GraphicalData{..Default::default()}
         }
     }
 }
@@ -570,106 +587,6 @@ pub enum PhysicsType {
     StaticTrajectory,
     StateSpace,
 }
-// pub struct Rocket {
-//     name: String,
-//     mass: f64,
-//     last_time: f64,
-//     A: na::SMatrix<f64, 12, 12>,
-//     x: State,
-//     position: na::Point3<f64>,
-//     rotation: na::Point3<f64>,
-//     components: Vec<Box<dyn ComponentPart>>
-// }
-
-// impl Rocket {
-//     pub fn new() -> Rocket {
-//         Rocket{
-//             name: "".to_string(),
-//             mass: todo!(),
-//             last_time: todo!(),
-//             A: todo!(),
-//             x: todo!(),
-//             position: todo!(),
-//             rotation: todo!(),
-//             components: vec![]
-//         }
-//     }
-// }
-
-// impl Simulatable for Rocket {
-//     fn get_name(&self) -> &str {
-//         todo!()
-//     }
-
-//     fn integrate_to_t(&mut self, t: f64) {
-//         let F_gravity = self.mass * 9.81 * z_down(); 
-//         let x_dot = self.A*self.x;
-//         // debug!("xdot: {}", x_dot);
-//         let dt = t - self.last_time;
-//         self.x = self.x
-//          + x_dot*dt
-//          + F_gravity/self.mass;
-//         self.last_time = t;
-//     }
-
-//     fn observe_position_and_rotation(&mut self) {
-//         self.position = na::Point3::new(self.x[0], self.x[1], self.x[2]);
-//         self.rotation = na::Point3::new(self.x[6], self.x[7], self.x[8]);
-//     }
-
-//     fn get_xdot(&self, x: &State, t: &f64) -> State {
-//         self.A*self.x
-//     }
-
-//     fn get_position(&self) -> na::Point3<f64> {
-//         self.position
-//     }
-
-//     fn set_position(&mut self, new_position: na::Point3<f64>) {
-//         self.position = new_position;
-//     }
-
-//     fn get_state(&self) -> SMatrix<f64, 12, 1> {
-//         self.x
-//     }
-
-//     fn set_state(&mut self, new_x: State) {
-//         self.x = new_x;
-//     }
-
-//     fn get_rotation(&self) -> na::Point3<f64> {
-//         self.rotation
-//     }
-
-//     fn set_rotation(&mut self, new_rotation: na::Point3<f64>) {
-//         self.rotation = new_rotation
-//     }
-
-//     fn get_component_forces(&mut self, t: f64) -> State {
-//         let mut component_force_vec = na::SMatrix::<f64, 12, 1>::zeros();
-//         for component in &mut self.components {
-//             component.update_to_time(vec![], t);
-//             component_force_vec = component_force_vec + component.get_force_on_parent();
-//         };
-
-//         return component_force_vec;
-//     }
-
-//     fn json_object_initialization(&self) -> sj::Value {
-//         todo!()
-//     }
-
-//     fn status_to_json(&self) -> sj::Value {
-//         // let json = json!(
-//         //     "id": self.id
-//         // )
-//         todo!()
-//     }
-
-//     fn export_data(&self, filepath: &str) {
-//         todo!();
-//     }
-// }
 
 
 pub struct ElectricalMotor {
@@ -722,7 +639,8 @@ pub struct IdealThruster {
     last_time: f64,
     position: na::SMatrix<f64, 3, 1>,
     orientation: na::UnitVector3<f64>,
-    integrator: Integrator
+    integrator: Integrator,
+    model: graphical::GraphicalData,
 }
 
 impl IdealThruster {
@@ -735,7 +653,8 @@ impl IdealThruster {
             last_time: 0.0,
             position: na::SMatrix::zeros(),
             orientation: na::UnitVector3::new_unchecked(na::Vector3::new(0.0, 0.0, 1.0)),
-            integrator: Integrator::RK4
+            integrator: Integrator::RK4,
+            ..Default::default()
         }
     }
 
@@ -775,6 +694,25 @@ impl ComponentPart for IdealThruster {
 
     fn set_force(&mut self, new_force: f64) {
         self.set_force = new_force;
+    }
+
+    fn datacom_get_model_json(&self) -> Value {
+        self.model.get_model_value()
+    }
+}
+
+impl Default for IdealThruster {
+    fn default() -> Self {
+        IdealThruster {
+            time_const: 0.0001,
+            force: 0.0,
+            set_force: 0.0,
+            last_time: 0.0,
+            position: na::SMatrix::zeros(),
+            orientation: na::UnitVector3::new_unchecked(na::Vector3::new(0.0, 0.0, 1.0)),
+            integrator: Integrator::RK4,
+            model: graphical::GraphicalData{..Default::default()}
+        }
     }
 }
 
@@ -831,6 +769,7 @@ pub trait ComponentPart {
     fn update_to_time(&mut self, y: Vec<f64>, t: f64);
     fn get_force_on_parent(&self) -> SMatrix<f64, 12, 1>;
     fn set_force(&mut self, new_force:f64);
+    fn datacom_get_model_json(&self) -> Value;
 }
 
 fn z_down() -> State {

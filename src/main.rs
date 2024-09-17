@@ -4,6 +4,13 @@
         - Basic stabilizing flight computer
         - Betaflight duplicate
         - 
+    - Scenario Loading
+        - Load Environments (Empty Space, Gravity, Etc)
+        - Load Objects
+        - Load Terrain (If Applicable)
+    - Simulation Running
+        - Skip static objects
+        - Midpoint time steps for 
 
 
 */
@@ -25,13 +32,20 @@
 extern crate nalgebra as na;
 mod sixdof;
 extern crate pretty_env_logger;                                             // Logger
-#[macro_use] extern crate log;                                              // Logging crate
+#[macro_use] extern crate log;
+use std::error::Error;
+
+// Logging crate
 use crate::sixdof::Simulatable;
 extern crate serde_json as sj;
 extern crate serde;
 extern crate indicatif;
 mod setup;
-fn main() {
+mod datatypes;
+mod environments;
+mod fc;
+mod graphical;
+fn main() -> Result<(), std::io::Error> {
     let t_start = std::time::Instant::now();
     std::env::set_var("RUST_LOG", "trace");                                 // Initialize logger
     pretty_env_logger::init();
@@ -39,16 +53,22 @@ fn main() {
 
     let mut sim = sixdof::Sim::new(1.0E-3);
     
-    let mut drone = setup::blizzard_model();
-    sim.add_object(drone);
-    sim.run_until(0.1);
-    // println!("{}", sim.scene_initialization_to_datacom());
-    info!("Program End!");
-    info!("Final Position: {}", sim.get_object(0).get_position());
-    sim.record_run("data/runs");
-    info!("Run recorded. Saved to data/runs");
-    println!("Program finished in {:.2?} in {:} steps", t_start.elapsed(), sim.steps);
+    let mut drone = setup::test_falling_object();
 
+
+    
+    sim.add_object(drone);
+
+    sim.datacom_start("127.0.0.1:8080").expect("No connectioned established.");
+    sim.run_until(1.0).expect("Sim failed!");
+    // // println!("{}", sim.scene_initialization_to_datacom());
+    info!("Program End!");
+    // info!("Final Position: {}", sim.get_object(0).get_position());
+    // sim.record_run("data/runs");
+    // info!("Run recorded. Saved to data/runs");
+    // println!("Program finished in {:.2?} in {:} steps", t_start.elapsed(), sim.steps);
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -178,5 +198,6 @@ mod tests {
         let final_unassisted = (1.0/2.0) * t*t * (-9.81);
         assert!(final_position > 0.5*final_unassisted);
     }
+
 
 }

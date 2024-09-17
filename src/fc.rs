@@ -31,7 +31,7 @@ impl<const U: usize> FlightControl<U> for FlightComputer<U> {
     }
 
     fn calculate_u(&self, current_state: State) -> Inputs<U> {
-        debug!("{}", self.K*current_state);
+        // debug!("{}", self.K*current_state);
         self.K*current_state
     }
 }

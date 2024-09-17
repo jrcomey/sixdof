@@ -1,4 +1,6 @@
 use crate::sixdof::{self, *};
+use crate::datatypes::*;
+use crate::fc::*;
 
 pub fn test_falling_object() -> Box<sixdof::Vehicle<8>> {
     let mut drone = Box::new(sixdof::Vehicle::<8>::new());
@@ -110,7 +112,7 @@ pub fn non_falling_obect() -> Box<sixdof::Vehicle<1>> {
         Box::new(sixdof::IdealThruster::new())
     );
 
-    let mut flight_computer = sixdof::FlightComputer::new(
+    let mut flight_computer = FlightComputer::new(
         1.0E-3, 
         vec![], 
         na::SMatrix::<f64, 1, 12>::from_row_slice(&[
