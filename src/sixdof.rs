@@ -1,5 +1,6 @@
 use core::num;
 use std::fmt::Error;
+use std::time::Duration;
 use std::u64;
 use std::{fmt::format, mem::zeroed, vec};
 use indicatif::ProgressBar;
@@ -14,6 +15,9 @@ use crate::{fc::*};
 use std::net::TcpStream;
 use std::io::{Read, Write};
 use crate::graphical::{self, GraphicalData};
+use std::fs::File;
+
+const CHUNK_SIZE: usize = 4096;
 
 pub struct Sim {
     objects: Vec<Box<dyn Simulatable>>,
@@ -53,16 +57,31 @@ impl Sim {
     }
 
     pub fn run_until(&mut self, end_time: f64) -> Result<(), Error>{
+        info!("Running sim until {}", end_time);
         self.end_time = end_time;
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
         let mut graphical_frame_counter: u64 = 0;
         while self.current_time < self.end_time {
             for i in 0..self.objects.len(){
+
+                // Skip if static
+                match self.get_object(i).get_physics_type() {
+                    PhysicsType::Static => continue,
+                    _ => {
+                        // Advance to next time step t_n+1, and iterate over each object to 
+                        let t = self.current_time;
+                        self.get_object(i).integrate_to_t(t);
+                        self.get_object(i).observe_position_and_rotation();
+                        // println!("{}", self.get_object(i).get_state());
+                    }
+                }
+
                 // Advance to next time step t_n+1, and iterate over each object to 
-                let t = self.current_time;
-                self.get_object(i).integrate_to_t(t);
-                self.get_object(i).observe_position_and_rotation();
+                // let t = self.current_time;
+                // self.get_object(i).integrate_to_t(t);
+                // self.get_object(i).observe_position_and_rotation();
                 // println!("{}", self.get_object(i).get_state());
+                
             }
 
 
@@ -71,7 +90,8 @@ impl Sim {
             if self.is_gui {
                 if graphical_frame_counter >= self.frame_counter_update {
                     let packet = self.datacom_update_packet();
-                    self.datacom_send_packet(&self.datacom_port, &packet)?;
+                    // std::thread::sleep(Duration::from_millis(500));
+                    self.datacom_send_packet("127.0.0.1:8081", &packet)?;
                     graphical_frame_counter = 0;
                 }
                 else {
@@ -131,7 +151,7 @@ impl Sim {
                 "entities": entities
             });
 
-            debug!("{}", datacom_packet.to_string());
+            // debug!("{}", datacom_packet.to_string());
             return datacom_packet;
     }
 
@@ -146,37 +166,66 @@ impl Sim {
                     _ => ()
                 }
             }
-            debug!("{}", json!(commands).to_string());
+            // debug!("{}", json!(commands).to_string());
             return json!(commands).to_string();
     }
 
     pub fn datacom_send_packet(&self, addr: &str, data: &str) -> Result<(), Error> {
 
-        let max_connection_attempts = 10;
+        let max_connection_attempts = 100;
         let mut num_attempts = 0;
         while max_connection_attempts > num_attempts {
-            debug!("Connection attempt {}", num_attempts+1);
+            // debug!("Connection attempt {}", num_attempts+1);
             let connection_result = TcpStream::connect(addr);
-
+            std::thread::sleep(std::time::Duration::from_millis(10));
 
             match &connection_result {
                 Ok(_) => {
-                    debug!("Established connection. Transmitting data...");
+                    // debug!("Established connection. Transmitting data...");
                     let mut stream = connection_result.unwrap();
                     stream.write_all(&data.as_bytes()).unwrap();
-                    debug!("Successfully transmitted packet");
+                    // debug!("Successfully transmitted packet");
                     return Ok(());
                 },
                 Err(_) => {
-                    debug!("Connection attempt failed");
+                    // error!("Connection attempt failed");
                     num_attempts+=1;
                 }
             }
         }
 
-        
         error!("Connection attempt timed out.");
         Err(Error)
+    }
+
+    pub fn datacom_send_large_file(&self, addr: &str, filepath: &str) -> Result<(), Error> {
+        // debug!("Sending large file: {}", filepath);
+        let mut packets_sent = 0;
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.write_all(filepath.as_bytes()).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        let mut file = File::open(filepath).unwrap();
+        let file_size = file.metadata().unwrap().len();
+        // debug!("Filesize: {}", file_size);
+        // std::thread::sleep(Duration::from_millis(500));
+        // Send file size first
+        stream.write_all(&file_size.to_be_bytes()).unwrap();
+        
+        let mut buffer = [0; CHUNK_SIZE];
+        let mut bytes_sent = 0;
+    
+        while bytes_sent < file_size {
+            // debug!("Sending packet {}", packets_sent+1);
+            let bytes_read = file.read(&mut buffer).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+            stream.write_all(&buffer[..bytes_read]).unwrap();
+            bytes_sent += bytes_read as u64;
+            packets_sent += 1;
+            // std::thread::sleep(Duration::from_millis(100));
+        }
+        Ok(())
     }
 
     pub fn datacom_start(&mut self, datacom_addr: &str) -> Result<(), Error> {
@@ -189,11 +238,16 @@ impl Sim {
         self.datacom_send_packet(datacom_addr, &initialization_packet.to_string())?;
         info!("Initialization packet transmitted.");
         // Retrieve and send model files      
+        // std::thread::sleep(Duration::from_millis(1000));
         let unique_model_names = self.get_unique_model_names()?;
         for i in unique_model_names.into_iter() {
-            let file = std::fs::read_to_string(i).expect("Failed to read file!");
-            self.datacom_send_packet(datacom_addr, file.as_str())?;
+            info!("Transmitting packet for {}", &i);
+            // let file = std::fs::read_to_string(i).expect("Failed to read file!");
+            // debug!("File:{}", file.as_str());
+            // self.datacom_send_packet(datacom_addr, file.as_str())?;
+            self.datacom_send_large_file(datacom_addr, &i).unwrap();
         }
+        self.datacom_send_packet(datacom_addr, "END")?;
         info!("Models transmitted.");
 
 
@@ -226,9 +280,9 @@ impl Default for Sim {
             end_time: 0.0, 
             dt: 1.0E-3, 
             steps: 0,
-            is_gui: true,
+            is_gui: false,
             datacom_port: "".to_string(),
-            frame_counter_update: 100,
+            frame_counter_update: 10,
         }
     }
     
@@ -253,6 +307,8 @@ pub trait Simulatable {
     fn datacom_json_initialize(&mut self) -> Option<serde_json::Value>;
     fn datacom_json_command_step(&self) -> Option<Vec<Value>>;
     fn get_model_path(&self) -> &str;
+    fn get_physics_type(&self) -> &PhysicsType;
+    fn set_physics_type(&mut self, new_type: PhysicsType);
 }
 
 pub struct Vehicle<const U: usize> {
@@ -272,8 +328,8 @@ pub struct Vehicle<const U: usize> {
     integrator: Integrator,
     data: DataLogger<12, U>,
     is_graphical: bool,
-    obj_file: String,
     graphical_info: graphical::GraphicalData,
+    physics_type: PhysicsType,
 }
 
 
@@ -359,7 +415,7 @@ impl<const U: usize> Vehicle<U> {
     pub fn datacom_position_command(&self) -> Value {
         let pos_cmd = json!({
             "targetEntityID": self.id,
-            "commandType": "",
+            "commandType": "EntityChangePosition",
             "data": get_point_as_list(self.position),
         });
         return pos_cmd;
@@ -368,7 +424,7 @@ impl<const U: usize> Vehicle<U> {
     pub fn datacom_rotation_command(&self) -> Value {
         let rot_cmd = json!({
             "targetEntityID": self.id,
-            "commandType": "",
+            "commandType": "EntityRotate",
             "data": get_point_as_list(self.rotation),
         });
 
@@ -377,6 +433,14 @@ impl<const U: usize> Vehicle<U> {
 
     pub fn get_component(&mut self, id: usize) -> &mut Box<dyn ComponentPart> {
         &mut self.motors[id]
+    }
+
+    pub fn set_model(&mut self, new_graphical_info: GraphicalData) {
+        self.graphical_info = new_graphical_info;
+    }
+    
+    pub fn set_id(&mut self, new_id: u64) {
+        self.id = new_id;
     }
 }
 
@@ -554,7 +618,15 @@ impl<const U: usize> Simulatable for Vehicle<U> {
     }
 
     fn get_model_path(&self) -> &str {
-        &self.obj_file
+        &self.graphical_info.get_model_path()
+    }
+
+    fn get_physics_type(&self) -> &PhysicsType {
+        &self.physics_type
+    }
+
+    fn set_physics_type(&mut self, new_type: PhysicsType) {
+        self.physics_type = new_type;
     }
 }
 
@@ -577,8 +649,9 @@ impl<const U: usize> Default for Vehicle<U> {
             integrator: Integrator::ForwardEuler,
             data: DataLogger::<12, U>::new(),
             is_graphical: true,
-            obj_file: "DEFAULT".to_string(),
-            graphical_info: graphical::GraphicalData{..Default::default()}
+            // obj_file: "DEFAULT".to_string(),
+            graphical_info: graphical::GraphicalData{..Default::default()},
+            physics_type: PhysicsType::StateSpace,
         }
     }
 }
