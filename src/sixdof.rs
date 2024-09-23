@@ -17,8 +17,14 @@ use std::io::{Read, Write};
 use crate::graphical::{self, GraphicalData};
 use std::fs::File;
 
+/// Data transmission constant for chunk size, set at 4kB
 const CHUNK_SIZE: usize = 4096;
 
+/// Top level sim struct, which contains objects to be simulated and their environments.
+/// 
+/// Simulation works by advancing the sim to time step t_n+1, and then iterating over every object in the sim to 
+/// advance it to the next time step. Some of these objects will need to have a variable time step to accomodate 
+/// discrete control interfaces and electronics.
 pub struct Sim {
     objects: Vec<Box<dyn Simulatable>>,
     start_time: f64,
@@ -33,6 +39,7 @@ pub struct Sim {
 
 impl Sim {
 
+    /// Creates a new blank sim.
     pub fn new(dt: f64) -> Sim{
         Sim { 
             objects: vec![], 
@@ -48,14 +55,17 @@ impl Sim {
         todo!();
     }
 
+    /// Returns a reference to object with given ID. No error handling yet
     pub fn get_object(&mut self, id: usize) -> &mut Box<dyn Simulatable> {
         &mut self.objects[id]
     }
 
+    /// Exports current sim state to JSON. Unimplemented
     pub fn export_current_state_to_json_str(&mut self) -> &str {
         todo!();
     }
 
+    /// Runs sum until given time.
     pub fn run_until(&mut self, end_time: f64) -> Result<(), Error>{
         info!("Running sim until {}", end_time);
         self.end_time = end_time;
@@ -106,10 +116,12 @@ impl Sim {
         Ok(())
     }
 
+    /// Adds an object to the simulation.
     pub fn add_object(&mut self, object: Box<dyn Simulatable>) {
         self.objects.push(object);
     }
 
+    /// Creates JSON for DATACOM initialization. Legacy/
     pub fn scene_initialization_to_datacom(&self) -> String {
         
         let mut json_str: String = "".to_string();
@@ -121,6 +133,7 @@ impl Sim {
         return json_str;
     }
 
+    /// Exports all object state history to file.
     pub fn record_run(&self, folderpath: &str) {
         for object in (&self.objects).into_iter() {
             let filepath = "".to_owned() + folderpath+"/object_"+object.get_name()+".csv";
@@ -128,14 +141,17 @@ impl Sim {
         }
     }
 
+    /// Loads scenario from file. 
     pub fn load_scenario(folderpath: &str) {
         todo!();
     }
 
+    /// Adds data transmission port to DATACOM.
     pub fn add_datacom_port(&mut self, new_port: String) {
         self.datacom_port = new_port;
     }
 
+    /// Creates JSON for DATACOM initialziation.
     pub fn initialize_datacom_json(&mut self) -> Value {
             let mut entities: Vec<serde_json::Value> = vec![];
             for i in 0..self.objects.len(){
@@ -155,6 +171,7 @@ impl Sim {
             return datacom_packet;
     }
 
+    /// Creates state update packet to send to DATACOM
     pub fn datacom_update_packet(&mut self) -> String {
             let mut commands: Vec<Value> = vec![];
             for i in 0..self.objects.len(){
@@ -170,6 +187,7 @@ impl Sim {
             return json!(commands).to_string();
     }
 
+    /// Sends packet to DATACOM
     pub fn datacom_send_packet(&self, addr: &str, data: &str) -> Result<(), Error> {
 
         let max_connection_attempts = 100;
@@ -198,6 +216,7 @@ impl Sim {
         Err(Error)
     }
 
+    /// Transmits larger files in chunks to DATACOM
     pub fn datacom_send_large_file(&self, addr: &str, filepath: &str) -> Result<(), Error> {
         // debug!("Sending large file: {}", filepath);
         let mut packets_sent = 0;
@@ -228,6 +247,7 @@ impl Sim {
         Ok(())
     }
 
+    /// Single function that initializes and sends start information to DATACOM link
     pub fn datacom_start(&mut self, datacom_addr: &str) -> Result<(), Error> {
         // Set relevant data flags
         self.is_gui = true;
@@ -254,6 +274,7 @@ impl Sim {
         Ok(())
     }
 
+    /// Iterates over objects and gets unique model names
     pub fn get_unique_model_names(&mut self) -> Result<Vec<String>, Error> {
         let mut unique_model_paths: Vec<String> = vec![];
         for i in 0..self.objects.len() {
@@ -960,6 +981,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
     }
 } 
 
+/// Function to transform nalgebra point to list of floats
 fn get_point_as_list(point: na::Point3<f64>) -> [f64; 3] {
     return [point[0], point [1], point[2]];
 }
