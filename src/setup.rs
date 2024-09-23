@@ -1,3 +1,4 @@
+use crate::graphical::GraphicalData;
 use crate::sixdof::{self, *};
 use crate::datatypes::*;
 use crate::fc::*;
@@ -197,4 +198,16 @@ pub fn blizzard_model() -> Box<sixdof::Vehicle<12>> {
     blizzard.add_flight_controller(Box::new(fc));
  
     return Box::new(blizzard);
+}
+
+pub fn static_cube() -> Box<sixdof::Vehicle<1>> {
+    let mut cube = sixdof::Vehicle::<1>::new();
+    cube.set_mass(1.0);
+    cube.set_physics_type(sixdof::PhysicsType::Static);
+    cube.set_model(GraphicalData::new("StaticCube", "data/test_object/default_cube.obj", [0.0, 1.0, 1.0, 1.0]));
+    cube.set_id(1);
+    
+
+
+    return Box::new(cube);
 }
