@@ -1,7 +1,8 @@
 use crate::graphical::GraphicalData;
 use crate::sixdof::{self, *};
-use crate::datatypes::*;
+use crate::{components, datatypes::*};
 use crate::fc::*;
+use crate::components::*;
 
 pub fn test_falling_object() -> Box<sixdof::Vehicle<8>> {
     let mut drone = Box::new(sixdof::Vehicle::<8>::new());
@@ -110,7 +111,7 @@ pub fn non_falling_obect() -> Box<sixdof::Vehicle<1>> {
     drone.set_state(state_new);
     
     drone.add_component(
-        Box::new(sixdof::IdealThruster::new())
+        Box::new(components::IdealThruster::new())
     );
 
     let mut flight_computer = FlightComputer::new(

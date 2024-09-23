@@ -45,6 +45,7 @@ mod datatypes;
 mod environments;
 mod fc;
 mod graphical;
+mod components;
 fn main() -> Result<(), std::io::Error> {
     let t_start = std::time::Instant::now();
     std::env::set_var("RUST_LOG", "trace");                                 // Initialize logger
@@ -58,12 +59,13 @@ fn main() -> Result<(), std::io::Error> {
 
     
     sim.add_object(drone);
+    sim.add_object(setup::static_cube());
 
     sim.datacom_start("127.0.0.1:8080").expect("No connectioned established.");
     sim.run_until(1.0).expect("Sim failed!");
     // // println!("{}", sim.scene_initialization_to_datacom());
     info!("Program End!");
-    // info!("Final Position: {}", sim.get_object(0).get_position());
+    info!("Final Position: {}", sim.get_object(0).get_position());
     // sim.record_run("data/runs");
     // info!("Run recorded. Saved to data/runs");
     // println!("Program finished in {:.2?} in {:} steps", t_start.elapsed(), sim.steps);
