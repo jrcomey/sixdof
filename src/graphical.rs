@@ -14,7 +14,7 @@ impl Default for GraphicalData {
     fn default() -> Self {
         GraphicalData {
             name: "DEFAULT_MODEL_NAME".to_string(),
-            filepath: "DEFAULT_FILEPATH".to_string(),
+            filepath: "data/test_object/test.obj".to_string(),
             relative_position: [0.0, 0.0, 0.0],
             orientation: [0.0, 0.0, 0.0],
             rotation: [0.0, 0.0, 0.0],
@@ -24,6 +24,16 @@ impl Default for GraphicalData {
 }
 
 impl GraphicalData {
+
+    pub fn new(name: &str, filepath: &str, color: [f64; 4]) -> Self {
+        GraphicalData {
+            name: name.to_string(),
+            filepath: filepath.to_string(),
+            color: color,
+            ..Default::default()
+        }
+    }
+
     pub fn get_model_value(&self) -> Value {
         json!({
             "Name": self.name,
@@ -33,5 +43,9 @@ impl GraphicalData {
             "Rotation": self.rotation,
             "Color": self.color
         })
+    }
+
+    pub fn get_model_path(&self) -> &str {
+        &self.filepath
     }
 }
