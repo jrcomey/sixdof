@@ -17,7 +17,7 @@ pub struct OrbitalBody {
 impl Default for OrbitalBody {
     fn default() -> Self {
         OrbitalBody{
-            grav_field: GravitationalField{..Default::default()},
+            grav_field: GravitationalField::default(),
             atmosphere: Option::Some(Atmosphere {..Default::default()}),
             position: na::Point3::origin(),
         }
@@ -34,16 +34,20 @@ impl Default for Atmosphere {
     }
 }
 
-pub struct GravitationalField {
-    mass: f64,
-    soi_radius: f64,
+/// Enum for gravitational field. Can either be a point mass, or a constant field.
+pub enum GravitationalField {
+    PointMass {
+        mass: f64,
+        soi_radius: f64
+    },
+    Constant {
+        acceleration: f64,
+        direction: na::Vector3<f64>
+    }
 }
 
 impl Default for GravitationalField {
     fn default() -> Self {
-        GravitationalField {
-            mass: 0.0, 
-            soi_radius: 1.0E3
-        }
+        GravitationalField::Constant { acceleration: 9.80665, direction: -na::Vector3::z() }
     }
 }
