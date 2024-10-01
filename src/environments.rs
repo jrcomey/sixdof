@@ -36,6 +36,7 @@ impl Default for Atmosphere {
 }
 
 /// Enum for gravitational field. Can either be a point mass, or a constant field.
+#[derive(Clone, Copy)]
 pub enum GravitationalField {
     PointMass {
         mass: f64,
@@ -143,7 +144,6 @@ impl EnviromentalEffect for GravitationalField {
                 ])
             }
         };
-
-        return State::zeros();
+        return x_dot_grav;
     }
 }

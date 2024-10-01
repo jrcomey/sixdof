@@ -1,5 +1,7 @@
 use core::num;
+use std::cell::RefCell;
 use std::fmt::Error;
+use std::sync::RwLock;
 use std::time::Duration;
 use std::u64;
 use std::{fmt::format, mem::zeroed, vec};
@@ -73,16 +75,20 @@ impl Sim {
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
         let mut graphical_frame_counter: u64 = 0;
         while self.current_time < self.end_time {
-            for i in 0..self.objects.len(){
-
+            for object in &mut self.objects{
                 // Skip if static
-                match self.get_object(i).get_physics_type() {
+                match &object.get_physics_type() {
                     PhysicsType::Static => continue,
                     _ => {
                         // Advance to next time step t_n+1, and iterate over each object to 
                         let t = self.current_time;
-                        self.get_object(i).integrate_to_t(t);
-                        self.get_object(i).observe_position_and_rotation();
+                        // let environemnts = self.environments.borrow().to_vec();
+                        // let environments: Vec<_> = self.environments.into_iter().collect();
+                        // self.get_object(i).integrate_to_t(t, self.environments);
+                        // self.get_object(i).observe_position_and_rotation();
+
+                        object.integrate_to_t(t, &self.environments);
+                        object.observe_position_and_rotation();
                         // println!("{}", self.get_object(i).get_state());
                     }
                 }
@@ -291,6 +297,8 @@ impl Sim {
 
         Ok(unique_model_paths)
     }
+
+    // pub fn add_environment: 
 }
 
 impl Default for Sim {
@@ -329,10 +337,10 @@ pub trait Simulatable {
     fn set_physics_type(&mut self, new_type: PhysicsType);
     fn get_model_path(&self) -> &str;
 
-    fn integrate_to_t(&mut self, t: f64);
+    fn integrate_to_t(&mut self, t: f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>);
     fn observe_position_and_rotation(&mut self);
     
-    fn get_xdot(&self, x: &State, t: &f64) -> State;
+    fn get_xdot(&self, x: &State, t: &f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State;
     
     fn get_component_forces(&mut self, t: f64) -> State;
     fn json_object_initialization(&self) -> sj::Value;
@@ -341,7 +349,7 @@ pub trait Simulatable {
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>);
     fn datacom_json_initialize(&mut self) -> Option<serde_json::Value>;
     fn datacom_json_command_step(&self) -> Option<Vec<Value>>;
-    fn calculate_environmental_force(&mut self, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State;
+    fn calculate_environmental_acceleration(&self, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State;
     
 }
 
@@ -487,29 +495,19 @@ impl<const U: usize> Simulatable for Vehicle<U> {
     fn set_name(&mut self, new_name: &str) {
         todo!();
     }
-    fn integrate_to_t(&mut self, t: f64) {
-        let F_gravity = self.mass * 9.81 * z_acc_down(); 
-        // debug!("Acceleration due to Gravity: {}", F_gravity);
-        // let x_dot = self.get_xdot_A() + self.get_xdot_B(self.get_u(self.x));
-        // debug!("U: {}", self.get_xdot_B(self.get_u(self.x)));
-        // debug!("xdot: {}", x_dot);
+    fn integrate_to_t(&mut self, t: f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) {
         let dt = t - self.last_time;
-        // self.x = self.x
-        //  + dt*(
-        //     x_dot
-        //     + F_gravity/self.mass
-        //  );
         self.x = self.integrator.integrate(
-            |x, t| self.get_xdot(&x, &t), &self.x, &self.last_time, &t);
+            |x, t| self.get_xdot(&x, &t, &environment_vector), &self.x, &self.last_time, &t);
         self.last_time = t;
         self.data.record(t, self.get_state(), self.get_u(self.x))
     }
 
-    fn get_xdot(&self, x: &State, t: &f64) -> State {
-        let F_gravity = self.mass * 9.81 * z_acc_down(); 
+    fn get_xdot(&self, x: &State, t: &f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State {
+        let x_dot_env = self.calculate_environmental_acceleration(environment_vector); 
         self.A*x
             + self.B*self.get_u(*x)
-            + F_gravity/self.mass
+            + x_dot_env
     }
 
     fn observe_position_and_rotation(&mut self) {
@@ -666,10 +664,9 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.physics_type = new_type;
     }
 
-    fn calculate_environmental_force(&mut self, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State {
+    fn calculate_environmental_acceleration(&self, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State {
         
         let environment_state_xdot: State =  environment_vector.into_iter().map(|environment| environment.calculate_acceleration_on_object(&self.mass, &self.position)).sum();
-
         return environment_state_xdot;
     }
 }

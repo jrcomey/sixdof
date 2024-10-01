@@ -60,6 +60,7 @@ fn main() -> Result<(), std::io::Error> {
     
     sim.add_object(drone);
     sim.add_object(setup::static_cube());
+    
 
     sim.datacom_start("127.0.0.1:8080").expect("No connectioned established.");
     sim.run_until(1.0).expect("Sim failed!");
