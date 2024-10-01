@@ -10,7 +10,7 @@ use serde::de::value;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use crate::datatypes::{State, Inputs};
-use crate::{fc::*};
+use crate::{environments, fc::*};
 use std::net::TcpStream;
 use std::io::{Read, Write};
 use crate::graphical::{self, GraphicalData};
@@ -35,6 +35,7 @@ pub struct Sim {
     is_gui: bool,
     datacom_port: String,
     frame_counter_update: u64,
+    environments: Vec<Box<dyn environments::EnviromentalEffect>>,
 }
 
 impl Sim {
@@ -304,22 +305,35 @@ impl Default for Sim {
             is_gui: false,
             datacom_port: "".to_string(),
             frame_counter_update: 10,
+            environments: vec![
+                Box::new(
+                    environments::GravitationalField::default()
+                )
+            ]
         }
     }
     
 }
 
 pub trait Simulatable {
+    // Getter and Setter functions
     fn get_name(&self) -> &str;
-    fn integrate_to_t(&mut self, t: f64);
-    fn observe_position_and_rotation(&mut self);
+    fn set_name(&mut self, new_name: &str);
     fn get_position(&self) -> na::Point3<f64>;
-    fn get_xdot(&self, x: &State, t: &f64) -> State;
     fn set_position(&mut self, new_position: na::Point3<f64>);
     fn get_rotation(&self) -> na::Point3<f64>;
     fn set_rotation(&mut self, new_rotation: na::Point3<f64>);
     fn get_state(&self) -> SMatrix<f64, 12, 1>;
     fn set_state(&mut self, new_x: State);
+    fn get_physics_type(&self) -> &PhysicsType;
+    fn set_physics_type(&mut self, new_type: PhysicsType);
+    fn get_model_path(&self) -> &str;
+
+    fn integrate_to_t(&mut self, t: f64);
+    fn observe_position_and_rotation(&mut self);
+    
+    fn get_xdot(&self, x: &State, t: &f64) -> State;
+    
     fn get_component_forces(&mut self, t: f64) -> State;
     fn json_object_initialization(&self) -> sj::Value;
     fn status_to_json(&self) -> sj::Value;
@@ -327,9 +341,8 @@ pub trait Simulatable {
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>);
     fn datacom_json_initialize(&mut self) -> Option<serde_json::Value>;
     fn datacom_json_command_step(&self) -> Option<Vec<Value>>;
-    fn get_model_path(&self) -> &str;
-    fn get_physics_type(&self) -> &PhysicsType;
-    fn set_physics_type(&mut self, new_type: PhysicsType);
+    fn calculate_environmental_force(&mut self, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State;
+    
 }
 
 pub struct Vehicle<const U: usize> {
@@ -471,6 +484,9 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         &self.name
     }
     
+    fn set_name(&mut self, new_name: &str) {
+        todo!();
+    }
     fn integrate_to_t(&mut self, t: f64) {
         let F_gravity = self.mass * 9.81 * z_acc_down(); 
         // debug!("Acceleration due to Gravity: {}", F_gravity);
@@ -649,6 +665,13 @@ impl<const U: usize> Simulatable for Vehicle<U> {
     fn set_physics_type(&mut self, new_type: PhysicsType) {
         self.physics_type = new_type;
     }
+
+    fn calculate_environmental_force(&mut self, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State {
+        
+        let environment_state_xdot: State =  environment_vector.into_iter().map(|environment| environment.calculate_acceleration_on_object(&self.mass, &self.position)).sum();
+
+        return environment_state_xdot;
+    }
 }
 
 impl<const U: usize> Default for Vehicle<U> {
@@ -683,11 +706,7 @@ pub enum PhysicsType {
 }
 
 
-enum IgnitionStatus {
-    Ready,
-    Active,
-    Spent
-}
+
 pub enum Status {
     Active,
     Inactive
