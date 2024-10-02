@@ -53,23 +53,26 @@ fn main() -> Result<(), std::io::Error> {
     info!("Program Start!");
 
     let mut sim = sixdof::Sim::new(1.0E-3);
-    
-    let mut drone = setup::test_falling_object();
 
+    let earth = setup::static_earth_obj();
+    let ISS = setup::ISS();
 
-    
-    sim.add_object(drone);
+    sim.add_object(earth);
     sim.add_object(setup::static_cube());
+    sim.add_object(ISS);
+    sim.clear_environments();
+    sim.add_environment(Box::new(environments::GravitationalField::PointMass { mass:5.97219E24, soi_radius: 0.0, position: na::Point3::origin() }));
     
 
-    sim.datacom_start("127.0.0.1:8080").expect("No connectioned established.");
-    sim.run_until(1.0).expect("Sim failed!");
+    // sim.datacom_start("127.0.0.1:8080").expect("No connectioned established.");
+    sim.run_until(30.0*5400.0).expect("Sim failed!");
     // // println!("{}", sim.scene_initialization_to_datacom());
     info!("Program End!");
-    info!("Final Position: {}", sim.get_object(0).get_position());
-    // sim.record_run("data/runs");
-    // info!("Run recorded. Saved to data/runs");
-    // println!("Program finished in {:.2?} in {:} steps", t_start.elapsed(), sim.steps);
+    info!("Final Position: {}", sim.get_object(1).get_position());
+    println!("Program finished in {:.2?} in {:} steps", t_start.elapsed(), sim.steps);
+
+    sim.record_run("data/runs");
+    info!("Run recorded. Saved to data/runs");
 
     Ok(())
 }

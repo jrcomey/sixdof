@@ -1,8 +1,8 @@
-use core::num;
+use core::{num, time};
 use std::cell::RefCell;
 use std::fmt::Error;
 use std::sync::RwLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::u64;
 use std::{fmt::format, mem::zeroed, vec};
 use indicatif::ProgressBar;
@@ -11,7 +11,7 @@ use nalgebra as na;
 use serde::de::value;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
-use crate::datatypes::{State, Inputs};
+use crate::datatypes::{State, Inputs, GRAPHICAL_SCALING_FACTOR};
 use crate::{environments, fc::*};
 use std::net::TcpStream;
 use std::io::{Read, Write};
@@ -73,7 +73,15 @@ impl Sim {
         info!("Running sim until {}", end_time);
         self.end_time = end_time;
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
-        let mut graphical_frame_counter: u64 = 0;
+        let mut graphical_frame_counter: u64 = 100;
+        let next_update = Duration::from_micros(16_667);
+        let mut last_update_time = Instant::now();
+
+        // Initialize random other vectors
+        for object in &mut self.objects {
+            object.observe_position_and_rotation();
+        }
+
         while self.current_time < self.end_time {
             for object in &mut self.objects{
                 // Skip if static
@@ -89,6 +97,7 @@ impl Sim {
 
                         object.integrate_to_t(t, &self.environments);
                         object.observe_position_and_rotation();
+                        // debug!("{} state: {}", object.get_name(), object.get_state());
                         // println!("{}", self.get_object(i).get_state());
                     }
                 }
@@ -104,15 +113,18 @@ impl Sim {
 
             // If it's a graphical step, generate an update packet and send it over network.
             // Only try this if the sim is supposed to be graphical.
+            let time_check = Instant::now();
+
             if self.is_gui {
-                if graphical_frame_counter >= self.frame_counter_update {
+                if time_check.duration_since(last_update_time) >= next_update {
                     let packet = self.datacom_update_packet();
                     // std::thread::sleep(Duration::from_millis(500));
                     self.datacom_send_packet("127.0.0.1:8081", &packet)?;
-                    graphical_frame_counter = 0;
+                    // graphical_frame_counter = 0;
+                    last_update_time = time_check;
                 }
                 else {
-                    graphical_frame_counter += 1;
+                    // graphical_frame_counter += 1;
                 }
             }
             self.current_time = self.current_time + self.dt;
@@ -142,7 +154,7 @@ impl Sim {
 
     /// Exports all object state history to file.
     pub fn record_run(&self, folderpath: &str) {
-        for object in (&self.objects).into_iter() {
+        for object in &self.objects {
             let filepath = "".to_owned() + folderpath+"/object_"+object.get_name()+".csv";
             object.export_data(&filepath);
         }
@@ -298,7 +310,13 @@ impl Sim {
         Ok(unique_model_paths)
     }
 
-    // pub fn add_environment: 
+    pub fn add_environment(&mut self, new_environment: Box<dyn environments::EnviromentalEffect>) {
+        self.environments.push(new_environment);
+    }
+
+    pub fn clear_environments(&mut self) {
+        self.environments = vec![];
+    }
 }
 
 impl Default for Sim {
@@ -458,7 +476,7 @@ impl<const U: usize> Vehicle<U> {
         let pos_cmd = json!({
             "targetEntityID": self.id,
             "commandType": "EntityChangePosition",
-            "data": get_point_as_list(self.position),
+            "data": get_point_as_list(self.position*GRAPHICAL_SCALING_FACTOR),
         });
         return pos_cmd;
     }
@@ -493,7 +511,7 @@ impl<const U: usize> Simulatable for Vehicle<U> {
     }
     
     fn set_name(&mut self, new_name: &str) {
-        todo!();
+        self.name = new_name.to_string();
     }
     fn integrate_to_t(&mut self, t: f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) {
         let dt = t - self.last_time;
@@ -623,8 +641,8 @@ impl<const U: usize> Simulatable for Vehicle<U> {
             let json_file = Option::Some(json!({
                 "Name": self.name,
                 "id": self.id,
-                "Scale": [1.0, 1.0, 1.0],
-                "Position": [self.position[0], self.position[1], self.position[2]],
+                "Scale": self.graphical_info.scale,
+                "Position": [self.position[0]*GRAPHICAL_SCALING_FACTOR, self.position[1]*GRAPHICAL_SCALING_FACTOR, self.position[2]*GRAPHICAL_SCALING_FACTOR],
                 "Rotation": [self.rotation[0], self.rotation[1], self.rotation[2]],
                 "Models": model_list,
             }));
@@ -833,10 +851,13 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
     pub fn to_csv(&self, filepath: &str) {
         // Setup
         let mut csv: String = "Time,X Position,Y Position,Z Position,x_vel,y_vel,z_vel,Pitch,Roll,Yaw,pitch_vel,roll_vel,yaw_vel".to_string();
-        for i in (&self.input_vector[0]) {
-            csv.push_str(&format!(",U_{}", i));
+        if U > 1 {
+            for i in (&self.input_vector[0]) {
+                csv.push_str(&format!(",U_{}", i));
+            }
+            csv.push_str("\n");
         }
-        csv.push_str("\n");
+        
 
         // Iterate over all datapoints
         for (i, _) in self.time_vector.iter().enumerate() {
@@ -845,10 +866,12 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             for state_el in (&self.state_vector[i]).into_iter() {
                 local_str.push_str(&format!(",{:?}", state_el));
             }
-
-            for input in (&self.input_vector[i]).into_iter() {
-                local_str.push_str(&format!(",{:?}", input));
+            if U > 1 {
+                for input in (&self.input_vector[i]).into_iter() {
+                    local_str.push_str(&format!(",{:?}", input));
+                }
             }
+            
             local_str.push_str("\n");
             csv.push_str(&local_str);
         }

@@ -1,8 +1,8 @@
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import seaborn as sns
-
+import numpy as np
+# import seaborn as sns
 
 def plothusly(ax, x, y, *, xtitle='', ytitle='',
               datalabel='', title='', linestyle='-',
@@ -52,7 +52,7 @@ def plothus(ax, x, y, *, datalabel='', linestyle = '-',
     return out
 
 plt.style.use("default")
-plt.style.use("seaborn-bright")
+# plt.style.use("seaborn-bright")
 
 
 params={#FONT SIZES
@@ -83,10 +83,10 @@ params={#FONT SIZES
     'legend.labelspacing':0,}
 mpl.rcParams.update(params)
 
-colors = sns.color_palette(palette="bright", n_colors=3)
+# colors = sns.color_palette(palette="bright", n_colors=3)
 
-
-df = pd.read_csv("data/runs/object_.csv")
+object_name = "ISS"
+df = pd.read_csv(f"data/runs/object_{object_name}.csv")
 # fig, pos_plot = plt.subplots()
 # plothusly(
 #     pos_plot, 
@@ -118,7 +118,7 @@ plothus(zplot, df["Time"], df["X Position"], datalabel="X Position")
 zplot.xaxis.set_major_formatter(seconds)
 zplot.yaxis.set_major_formatter(meters)
 
-fig.savefig("data/runs/object__pos.png")
+fig.savefig(f"data/runs/object_{object_name}_pos.png")
 
 #%%###########################
 # Attitude plots
@@ -134,4 +134,21 @@ angleplot.xaxis.set_major_formatter(seconds)
 angleplot.yaxis.set_major_formatter(radians)
 
 
-fig.savefig("data/runs/object__att.png")
+fig.savefig(f"data/runs/object_{object_name}_att.png")
+
+#%%###########################
+
+fig, threedplot = plt.subplots()
+fig.add_subplot(projection='3d')
+
+# Prepare arrays x, y, z
+theta = np.linspace(-4 * np.pi, 4 * np.pi, 100)
+z = np.linspace(-2, 2, 100)
+r = z**2 + 1
+x = r * np.sin(theta)
+y = r * np.cos(theta)
+
+threedplot.plot(x, y, z, label='parametric curve')
+threedplot.legend()
+
+fig.savefig(f"data/runs/object_{object_name}_3d_plot.png")

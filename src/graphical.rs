@@ -7,7 +7,7 @@ pub struct GraphicalData {
     pub orientation: [f64; 3],
     pub rotation: [f64; 3],
     pub color: [f64; 4],
-
+    pub scale: [f64; 3],
 }
 
 impl Default for GraphicalData {
@@ -18,7 +18,8 @@ impl Default for GraphicalData {
             relative_position: [0.0, 0.0, 0.0],
             orientation: [0.0, 0.0, 0.0],
             rotation: [0.0, 0.0, 0.0],
-            color: [1.0, 0.0, 0.0, 1.0]
+            color: [1.0, 0.0, 0.0, 1.0],
+            scale: [1.0, 1.0, 1.0]
         }
     }
 }
@@ -41,11 +42,17 @@ impl GraphicalData {
             "Position": self.relative_position,
             "Orientation": self.orientation,
             "Rotation": self.rotation,
-            "Color": self.color
+            "Color": self.color,
+            "Scale": self.scale
         })
     }
 
     pub fn get_model_path(&self) -> &str {
         &self.filepath
+    }
+
+    pub fn set_scale(&mut self, new_scale: [f64; 3]) {
+        self.scale=new_scale;
+        debug!("New Scale: {}", self.scale[0]);
     }
 }

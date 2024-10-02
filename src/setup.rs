@@ -1,6 +1,6 @@
 use crate::graphical::GraphicalData;
 use crate::sixdof::{self, *};
-use crate::{components, datatypes::*};
+use crate::{components, datatypes::{self, *}};
 use crate::fc::*;
 use crate::components::*;
 
@@ -211,4 +211,70 @@ pub fn static_cube() -> Box<sixdof::Vehicle<1>> {
 
 
     return Box::new(cube);
+}
+
+pub fn static_earth_obj() -> Box<sixdof::Vehicle<1>> {
+    let mut earth = sixdof::Vehicle::<1>::new();
+    earth.set_mass(0.0);
+    earth.set_physics_type(sixdof::PhysicsType::Static);
+    let mut model = GraphicalData::new(
+        "static_Earth", "data/test_object/default_sphere.obj", [0.0, 0.0, 1.0, 1.0]);
+
+    let scale_factor = 6.378E6*datatypes::GRAPHICAL_SCALING_FACTOR;
+    model.set_scale([scale_factor, scale_factor, scale_factor]);
+    earth.set_model(
+        model
+    );
+    earth.set_id(0);
+    earth.set_name("earth");
+
+    return Box::new(earth);
+}
+
+pub fn ISS() -> Box<sixdof::Vehicle<1>> {
+    let mut ISS = sixdof::Vehicle::new();
+    ISS.set_mass(420.0E3);
+    
+    let mut model = GraphicalData::new("ISS", "data/test_object/default_cube.obj", [1.0, 0.0, 0.0, 1.0]);
+    let scale_factor = 100E3*datatypes::GRAPHICAL_SCALING_FACTOR;
+    model.set_scale([scale_factor, scale_factor, scale_factor]);
+    ISS.set_model(model);
+
+    let state_initial = na::SMatrix::<f64, 12, 1>::from_row_slice(&[
+        0.0,    // x
+        400.0E3+6.378E6,// y
+        0.0,    // z
+        7.67E3,    // xdot
+        0.0,    // ydot
+        0.0,    // zdot
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ]);
+
+    let A_new = na::SMatrix::<f64, 12, 12>::from_row_slice(&[
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ]);
+
+    ISS.set_A(A_new);
+
+    ISS.set_physics_type(sixdof::PhysicsType::StateSpace);
+    ISS.set_id(2);
+    ISS.set_state(state_initial);
+    ISS.set_name("ISS");
+    return Box::new(ISS)
 }

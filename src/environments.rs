@@ -110,7 +110,12 @@ impl EnviromentalEffect for GravitationalField {
         let x_dot_grav: State = match self {
             GravitationalField::PointMass { mass, soi_radius, position } => {
                 let r: na::Vector3<f64> = vehicle_position - position;
-                let acc_vector = -GRAV_CONST_UNIV * mass * vehicle_mass / (r.magnitude()*r.magnitude()) * r.normalize();
+                // debug!("Vehicle Position: {}", vehicle_position);
+                // debug!("Point Mass Position: {}", position);
+                let acc_vector = -GRAV_CONST_UNIV * mass  / (r.magnitude_squared()) * r.normalize();
+                // let acc_vector = r/r.magnitude();
+                // debug!("Magnitude of radius: {}", r.magnitude());
+                // debug!("Point Mass Gravitational Acceleration: {}", acc_vector);
                 State::from_row_slice(&[
                     0.0,                    // x_dot
                     0.0,                    // y_dot
@@ -127,6 +132,7 @@ impl EnviromentalEffect for GravitationalField {
                 ])
             },
             GravitationalField::Constant { acceleration, direction } => {
+                debug!("CONSTANT FIELD USED");
                 let acc_vector = (*acceleration)*direction;
                 State::from_row_slice(&[
                     0.0,                    // x_dot
