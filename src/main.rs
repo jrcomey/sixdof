@@ -9,8 +9,9 @@
         - Load Objects
         - Load Terrain (If Applicable)
     - Simulation Running
-        - Skip static objects
-        - Midpoint time steps for 
+        // - Skip static objects
+        - Midpoint time steps for digital applications
+
 
 
 */
@@ -52,25 +53,25 @@ fn main() -> Result<(), std::io::Error> {
     pretty_env_logger::init();
     info!("Program Start!");
 
-    let mut sim = sixdof::Sim::new(1.0E-3);
+    // let mut sim = sixdof::Sim::new(1.0E-2);
 
-    let earth = setup::static_earth_obj();
-    let ISS = setup::ISS();
+    // let earth = setup::static_earth_obj();
+    // let ISS = setup::ISS();
 
-    sim.add_object(earth);
-    sim.add_object(setup::static_cube());
-    sim.add_object(ISS);
-    sim.clear_environments();
-    sim.add_environment(Box::new(environments::GravitationalField::PointMass { mass:5.97219E24, soi_radius: 0.0, position: na::Point3::origin() }));
+    // sim.add_object(earth);
+    // sim.add_object(setup::static_cube());
+    // sim.add_object(ISS);
+    // sim.clear_environments();
+    // sim.add_environment(Box::new(environments::GravitationalField::PointMass { mass:5.97219E24, soi_radius: 0.0, position: na::Point3::origin() }));
     
-
+    let mut sim = sixdof::Sim::load_scenario("data/todo/");
     // sim.datacom_start("127.0.0.1:8080").expect("No connectioned established.");
-    sim.run_until(30.0*5400.0).expect("Sim failed!");
+    // sim.run_until(30.0*5400.0).expect("Sim failed!");
+    sim.run();
     // // println!("{}", sim.scene_initialization_to_datacom());
     info!("Program End!");
-    info!("Final Position: {}", sim.get_object(1).get_position());
+    info!("Final Position: {}", sim.get_object(0).get_position());
     println!("Program finished in {:.2?} in {:} steps", t_start.elapsed(), sim.steps);
-
     sim.record_run("data/runs");
     info!("Run recorded. Saved to data/runs");
 
