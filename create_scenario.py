@@ -297,8 +297,62 @@ def test_scenario():
     )
 
 
-    scene = Scenario(objects=[earth_graphical, mass_sim_ISS], environments=environments, min_dt=1E-3, end_time=5*60*90)
+    scene = Scenario(objects=[earth_graphical, mass_sim_ISS], environments=environments, min_dt=1E-3, end_time=6*60*90)
+    scene.create_run_json()
+
+def test_constellation_scenario():
+
+    # Earth Environment
+    environments = [
+        PointMassGravity(mass=5.97219E24),
+    ]
+
+    objects = []
+    longitudes = np.linspace(0, 360, 20)
+    for i, longitude in enumerate(longitudes):
+
+        r_iss, v_iss = keplerian_to_cartesian(a=414+6.378E3, e=0.0009143, i=np.deg2rad(51.6367), Ω=np.deg2rad(longitude), ω=np.deg2rad(50.0139), ν=np.deg2rad(310.1651),μ=398600.4418)
+        r_iss*=1E3
+        v_iss*=1E3
+        print(r_iss)
+        print(np.sqrt(r_iss[0]**2+r_iss[1]**2+r_iss[2]**2))
+        print(400.0E3+6.378E6)
+        init_state=np.array([
+            [r_iss[0]],    
+            [r_iss[1]],
+            [r_iss[2]],
+            [v_iss[0]],     
+            [v_iss[1]],
+            [v_iss[2]],
+            [0.0],
+            [0.0],
+            [0.0],
+            [0.0],
+            [0.0],
+            [0.0],
+            ])
+        mass_sim_ISS = Vehicle(
+            name=f"ISS_{i}", 
+            mass=1.0, 
+            # graphical_path="data/test_object/default_cube.obj", 
+            physics_type="RK4",
+            init_state= init_state,
+            graphical_elements=[GraphicalElement("CubeModel", "data/test_object/default_cube.obj", [0,0,0], [0,0,0], [0,0,0], [1,0,0,1], [100E3*1E-6,100E3*1E-6,100E3*1E-6])]
+        )
+        objects.append(mass_sim_ISS)
+
+    earth_graphical = Vehicle(
+        name="earth",
+        mass=0,
+        # graphical_path = "data/test_object/default_sphere.obj",
+        physics_type="Static",
+        graphical_elements=[GraphicalElement("EarthModel", "data/test_object/default_sphere.obj", [0,0,0], [0,0,0], [0,0,0], [0,0,1,1], [6.378E6*1E-6,6.378E6*1E-6,6.378E6*1E-6])]
+    )
+    objects.append(earth_graphical)
+
+
+    scene = Scenario(objects=objects, environments=environments, min_dt=1E-3, end_time=1*60*90)
     scene.create_run_json()
 
 if __name__ == "__main__":
-    test_scenario()
+    test_constellation_scenario()
