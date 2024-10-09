@@ -3,7 +3,8 @@ use std::cell::RefCell;
 use std::fmt::Error;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-use std::u64;
+use std::{default, u64};
+use std::{sync::atomic::{AtomicU64, Ordering}};
 use std::{fmt::format, mem::zeroed, vec};
 use indicatif::ProgressBar;
 use na::{Dyn, SMatrix};
@@ -58,6 +59,9 @@ impl Sim {
         todo!();
     }
 
+    pub fn set_end_time(&mut self, end_time: f64) {
+        self.end_time = end_time;
+    }
     /// Returns a reference to object with given ID. No error handling yet
     pub fn get_object(&mut self, id: usize) -> &mut Box<dyn Simulatable> {
         &mut self.objects[id]
@@ -80,7 +84,10 @@ impl Sim {
         // Initialize random other vectors
         for object in &mut self.objects {
             object.observe_position_and_rotation();
+            // debug!("{} state (post initialization): {}", object.get_name(), object.get_state());
         }
+
+        
 
         while self.current_time < self.end_time {
             for object in &mut self.objects{
@@ -135,6 +142,10 @@ impl Sim {
         Ok(())
     }
 
+    pub fn run(&mut self) {
+        self.run_until(self.end_time);
+    }
+
     /// Adds an object to the simulation.
     pub fn add_object(&mut self, object: Box<dyn Simulatable>) {
         self.objects.push(object);
@@ -161,8 +172,91 @@ impl Sim {
     }
 
     /// Loads scenario from file. 
-    pub fn load_scenario(folderpath: &str) {
-        todo!();
+    pub fn load_scenario(folderpath: &str) -> Self {
+        let mut filepath = folderpath.to_string();
+        filepath.push_str("/scenario_setup.json");
+        info!("Loading {}...", filepath);
+        let json_unparsed = std::fs::read_to_string(filepath).unwrap();
+        let json_parsed: Value = serde_json::from_str(&json_unparsed).unwrap();
+        
+        // Assign basic values
+        let name = json_parsed["scenarioName"].as_str().unwrap();
+        let end_time = json_parsed["endTime"].as_f64().unwrap();
+        let dt = json_parsed["dtMin"].as_f64().unwrap();
+        let mut Sim = Sim::new(dt);
+        Sim.set_end_time(end_time);
+        Sim.clear_environments(); // Remove me when default option is gone.
+
+
+        // Assign port if one is in the file
+        let datacom_port: String = match &json_parsed["datacomPort"] {
+            // Value::Null => {"".to_string()},
+            Value::String(port_name) => {port_name.to_string()},
+            _ => {"".to_string()}
+        };
+
+        // Iterate over every vehicle with the worst pattern match ever made.
+        // I can't figure out how to make this generic because I can't pass
+        // `U` as a constant when read from a file.
+        match &json_parsed["vehicles"] {
+            Value::Array(data_vector) => {
+                for obj in data_vector {
+                    // debug!("{}", obj["input_size"]);
+                    let U = obj["input_size"].as_f64().unwrap() as usize;
+                    let vehicle: Box<dyn Simulatable> = match U {
+                        1 => Box::new(Vehicle::<1>::load_from_json_parsed(&obj)),
+                        2 => Box::new(Vehicle::<2>::load_from_json_parsed(&obj)),
+                        3 => Box::new(Vehicle::<3>::load_from_json_parsed(&obj)),
+                        4 => Box::new(Vehicle::<4>::load_from_json_parsed(&obj)),
+                        5 => Box::new(Vehicle::<5>::load_from_json_parsed(&obj)),
+                        6 => Box::new(Vehicle::<6>::load_from_json_parsed(&obj)),
+                        7 => Box::new(Vehicle::<7>::load_from_json_parsed(&obj)),
+                        8 => Box::new(Vehicle::<8>::load_from_json_parsed(&obj)),
+                        9 => Box::new(Vehicle::<9>::load_from_json_parsed(&obj)),
+                        10 => Box::new(Vehicle::<10>::load_from_json_parsed(&obj)),
+                        11 => Box::new(Vehicle::<11>::load_from_json_parsed(&obj)),
+                        12 => Box::new(Vehicle::<12>::load_from_json_parsed(&obj)),
+                        13 => Box::new(Vehicle::<13>::load_from_json_parsed(&obj)),
+                        14 => Box::new(Vehicle::<14>::load_from_json_parsed(&obj)),
+                        15 => Box::new(Vehicle::<15>::load_from_json_parsed(&obj)),
+                        16 => Box::new(Vehicle::<16>::load_from_json_parsed(&obj)),
+                        17 => Box::new(Vehicle::<17>::load_from_json_parsed(&obj)),
+                        18 => Box::new(Vehicle::<18>::load_from_json_parsed(&obj)),
+                        19 => Box::new(Vehicle::<19>::load_from_json_parsed(&obj)),
+                        20 => Box::new(Vehicle::<20>::load_from_json_parsed(&obj)),
+                        _ => panic!("Unsupported number of inputs when creating vehicle")
+                    };
+                    Sim.add_object(vehicle);
+                    debug!("Loaded object {}", obj["name"].as_str().unwrap());
+                }
+            }
+            _ => {}
+        }
+        
+        match &json_parsed["environments"] { 
+            Value::Array(data_vector) => {
+                for environment in data_vector {
+                    let env_type = environment["type"].as_str().unwrap();
+                    debug!("{}", env_type);
+                    match env_type {
+                        "PointMassGravity" => {
+                            Sim.add_environment(Box::new(environments::GravitationalField::load_from_json_parsed(environment)))
+                            },
+                        "StaticField" => {
+                            ;
+                        },
+                        _ => {},
+                    };
+                }
+            },
+            _ => {}
+        }
+
+        // let mut Sim = Sim::new(dt);
+
+        
+
+        return Sim;
     }
 
     /// Adds data transmission port to DATACOM.
@@ -371,6 +465,8 @@ pub trait Simulatable {
     
 }
 
+static OBJECT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 pub struct Vehicle<const U: usize> {
     name: String,
     id: u64,
@@ -396,7 +492,7 @@ pub struct Vehicle<const U: usize> {
 impl<const U: usize> Vehicle<U> {
     pub fn new() -> Self {
         Vehicle{ name: "".to_string(), 
-        id: 0, 
+        id: OBJECT_COUNTER.fetch_add(1, Ordering::Relaxed), 
         mass: 1.0, // kg
         A: na::SMatrix::zeros(), 
         B: na::SMatrix::zeros(),
@@ -464,8 +560,83 @@ impl<const U: usize> Vehicle<U> {
         todo!();
     }
 
-    pub fn load_from_json_parsed(json_parsed: sj::Value) -> Vehicle<U> {
-        todo!();
+    pub fn load_from_json_parsed(json_parsed: &sj::Value) -> Vehicle<U> {
+        let name = json_parsed["name"].as_str().unwrap();
+        let mass = json_parsed["mass"].as_f64().unwrap();
+
+        let A_dat: Vec<f64> = json_parsed["A"]
+            .as_array()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+
+        let A: na::SMatrix<f64, 12, 12> = na::SMatrix::from_row_slice(&A_dat[..]);
+
+        let B_dat: Vec<f64> = json_parsed["B"]
+            .as_array()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+
+        let B: na::SMatrix<f64, 12, U> = na::SMatrix::from_row_slice(&B_dat[..]);
+
+        let x_dat: Vec<f64> = json_parsed["state"]
+            .as_array()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+
+        let x: na::SMatrix<f64, 12, 1> = na::SMatrix::from_row_slice(&x_dat[..]);
+
+        let (physics_type, integrator) = match json_parsed["physicsType"].as_str().unwrap() {
+            "RK4" => {
+                (PhysicsType::StateSpace, Integrator::RK4)
+            },
+            _ => {
+                (PhysicsType::Static, Integrator::RK4)
+            },
+        };
+
+        debug!("Name: {}", name);
+        debug!("Mass: {}", mass);
+        debug!("A: {}", A);
+        debug!("B: {}", B);
+        debug!("x: {}", x);
+        // debug!("Integrator: {}", integrator);
+
+        
+
+        let mut vehicle = Vehicle::<U> {
+            name: name.to_string(),
+            mass: mass,
+            A: A,
+            B: B,
+            x: x,
+            integrator: integrator,
+            physics_type: physics_type,
+            ..Default::default()
+        };
+
+        match &json_parsed["GraphicalElements"] {
+            Value::Array(data_vector) => {
+                for graph in data_vector{
+                    vehicle.set_model(graphical::GraphicalData::from_json(&graph));
+                }
+            },
+            _=> {
+                // graphical::GraphicalData::new("", "data/test_object/test.obj", [1.0, 1.0, 1.0, 1.0])
+            }
+        };
+
+
+        
+
+
+        return vehicle;
+        // todo!();
     }
 
     pub fn add_flight_controller(&mut self, new_fc: Box<dyn FlightControl<U>>) {
@@ -518,7 +689,18 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.x = self.integrator.integrate(
             |x, t| self.get_xdot(&x, &t, &environment_vector), &self.x, &self.last_time, &t);
         self.last_time = t;
-        self.data.record(t, self.get_state(), self.get_u(self.x))
+
+        match self.physics_type {
+            PhysicsType::Static => {
+                if self.last_time > 0.0 {
+                    self.data.record(t, self.get_state(), self.get_u(self.x));
+                }
+            }
+            _ => {
+                self.data.record(t, self.get_state(), self.get_u(self.x));
+            }
+        }
+        
     }
 
     fn get_xdot(&self, x: &State, t: &f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State {
@@ -591,7 +773,7 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.rotation[2],
         "Default");
 
-        debug!("{}", json_str);
+        // debug!("{}", json_str);
 
         let json = sj::from_str(&json_str).unwrap();
         return json;
@@ -693,7 +875,7 @@ impl<const U: usize> Default for Vehicle<U> {
     fn default() -> Self {
         Vehicle {
             name: "DEFAULT".to_string(),
-            id: u64::MAX,
+            id: OBJECT_COUNTER.fetch_add(1, Ordering::Relaxed),
             mass: 0.0,
             A: na::SMatrix::zeros(),
             B: na::SMatrix::zeros(),
@@ -719,6 +901,7 @@ pub enum PhysicsType {
     StaticTrajectory,
     StateSpace,
 }
+
 
 
 
