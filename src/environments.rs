@@ -4,6 +4,7 @@ use crate::datatypes::*;
 use na::Point;
 use nalgebra as na;
 use std::option::Option;
+use serde_json;
 
 
 /// Universal gravitational constant. 
@@ -88,6 +89,33 @@ impl GravitationalField {
 
     fn new_static_field(acceleration: f64, direction: na::Vector3<f64>) -> Self {
         GravitationalField::Constant { acceleration: acceleration, direction: direction }
+    }
+
+    pub fn load_from_json_parsed(json: &serde_json::Value) -> Self{
+        match json["type"].as_str().unwrap() {
+            "PointMassGravity" => {
+                let mut position_vec = na::Point3::<f64>::new(0.0, 0.0, 0.0);
+                let position_temp: Vec<_> = json["position"]
+                    .as_array()
+                    .unwrap()
+                    .into_iter()
+                    .collect();
+                for (i, position) in position_temp.iter().enumerate() {
+                    position_vec[i] = position.as_f64().unwrap();
+                }
+
+                // debug!("Point Mass: {} kg", json["mass"].as_f64().unwrap());
+                // debug!("soi_radius: {} m", json["soi_radius"].as_f64().unwrap());
+                // debug!("Point Mass Position: {}", position_vec);
+                GravitationalField::new_point_field(
+                    json["mass"].as_f64().unwrap(), 
+                    json["soi_radius"].as_f64().unwrap(), 
+                    position_vec)
+            },
+            _ => {
+                GravitationalField::Constant { acceleration: 0.0, direction: na::zero() }
+            }
+        }
     }
 }
 
