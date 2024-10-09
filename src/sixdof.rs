@@ -164,8 +164,8 @@ impl Sim {
     }
 
     /// Exports all object state history to file.
-    pub fn record_run(&self, folderpath: &str) {
-        for object in &self.objects {
+    pub fn record_run(&mut self, folderpath: &str) {
+        for object in &mut self.objects {
             let filepath = "".to_owned() + folderpath+"/object_"+object.get_name()+".csv";
             object.export_data(&filepath);
         }
@@ -457,7 +457,7 @@ pub trait Simulatable {
     fn get_component_forces(&mut self, t: f64) -> State;
     fn json_object_initialization(&self) -> sj::Value;
     fn status_to_json(&self) -> sj::Value;
-    fn export_data(&self, filepath: &str);
+    fn export_data(&mut self, filepath: &str);
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>);
     fn datacom_json_initialize(&mut self) -> Option<serde_json::Value>;
     fn datacom_json_command_step(&self) -> Option<Vec<Value>>;
@@ -505,7 +505,7 @@ impl<const U: usize> Vehicle<U> {
         last_time: 0.0,
         motors: vec![],
         integrator: Integrator::RK4,
-        data: DataLogger::<12, U>::new(),
+        data: DataLogger::<12, U>::new(0.0, 0, &""),
         is_graphical: true,
         ..Default::default()
      }
@@ -563,6 +563,7 @@ impl<const U: usize> Vehicle<U> {
     pub fn load_from_json_parsed(json_parsed: &sj::Value) -> Vehicle<U> {
         let name = json_parsed["name"].as_str().unwrap();
         let mass = json_parsed["mass"].as_f64().unwrap();
+        // let id = OBJECT_COUNTER.fetch_add(1, Ordering::Relaxed);
 
         let A_dat: Vec<f64> = json_parsed["A"]
             .as_array()
@@ -601,22 +602,44 @@ impl<const U: usize> Vehicle<U> {
         };
 
         debug!("Name: {}", name);
+        // debug!("ID: {}", id);
+        // debug!("ID: {}", id);
+        // debug!("ID: {}", id);
         debug!("Mass: {}", mass);
-        debug!("A: {}", A);
-        debug!("B: {}", B);
-        debug!("x: {}", x);
+        // debug!("A: {}", A);
+        // debug!("B: {}", B);
+        // debug!("x: {}", x);
         // debug!("Integrator: {}", integrator);
 
-        
+        let sample_time: f64 = match &json_parsed["SampleTime"] {
+            Value::Number(t_s) => {t_s.as_f64().unwrap()},
+            _ => {0.0}
+        };
+
+        let max_steps: u64 = match &json_parsed["MaxSteps"] {
+            Value::Number(t_s) => {t_s.as_u64().unwrap()},
+            _ => {0}
+        };
+
+        let run_name: &str = match &json_parsed["RunName"] {
+            Value::String(run_name) => run_name,
+            _=> "",
+        };
+
+        let storage_directory = format!("data/runs/{}/object_{}_{}", run_name, 0, name);
+
+        let mut data_recorder = DataLogger::<12,U>::new(sample_time, max_steps as usize, &storage_directory);
 
         let mut vehicle = Vehicle::<U> {
             name: name.to_string(),
             mass: mass,
+            // id: id,
             A: A,
             B: B,
             x: x,
             integrator: integrator,
             physics_type: physics_type,
+            data: data_recorder,
             ..Default::default()
         };
 
@@ -688,7 +711,6 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         let dt = t - self.last_time;
         self.x = self.integrator.integrate(
             |x, t| self.get_xdot(&x, &t, &environment_vector), &self.x, &self.last_time, &t);
-        self.last_time = t;
 
         match self.physics_type {
             PhysicsType::Static => {
@@ -801,8 +823,8 @@ impl<const U: usize> Simulatable for Vehicle<U> {
 
     }
 
-    fn export_data(&self, filepath: &str) {
-        self.data.to_csv(filepath);
+    fn export_data(&mut self, filepath: &str) {
+        self.data.to_csv(&filepath);
     }
 
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>) {
@@ -888,7 +910,7 @@ impl<const U: usize> Default for Vehicle<U> {
             last_time: -1.0,
             motors: vec![],
             integrator: Integrator::ForwardEuler,
-            data: DataLogger::<12, U>::new(),
+            data: DataLogger::<12, U>::new(0.0, 0, "DEFAULT"),
             is_graphical: true,
             // obj_file: "DEFAULT".to_string(),
             graphical_info: graphical::GraphicalData{..Default::default()},
@@ -1011,27 +1033,53 @@ fn forward_matrix(dt: f64) -> SMatrix<f64, 12, 12> {
 pub struct DataLogger<const S: usize, const U: usize> {
     time_vector: Vec<f64>,
     state_vector: Vec<na::SMatrix<f64, S, 1>>,
-    input_vector: Vec<Inputs<U>>
+    input_vector: Vec<Inputs<U>>,
+    sample_time: f64, 
+    last_time: f64,
+    max_steps: usize,
+    storage_directory: String,
+    num_refresh: u64,
 }
 
 impl<const S: usize, const U:usize> DataLogger<S, U> {
 
-    pub fn new() -> Self {
+    pub fn new(sample_time: f64, max_steps: usize, storage_directory: &str) -> Self {
+
+        debug!("Sample time: {}", sample_time);
         DataLogger{
             time_vector: vec![],
             state_vector: vec![],
-            input_vector: vec![]
+            input_vector: vec![],
+            sample_time: sample_time,
+            last_time: -100.0,
+            max_steps: max_steps,
+            storage_directory: storage_directory.to_string(),
+            ..Default::default()
         }
     }
 
     pub fn record(&mut self, time: f64, state: na::SMatrix<f64, S, 1>, input: Inputs<U>) {
-        self.time_vector.push(time);
-        self.state_vector.push(state);
-        self.input_vector.push(input);
+        
+        // Log data if sample time indicates it is ready, or bypass if values are null. 
+        if ((time - self.last_time) >= self.sample_time) 
+        || self.sample_time==0.0 {
+            self.time_vector.push(time);
+            self.state_vector.push(state);
+            self.input_vector.push(input);
+            self.last_time = time;
+            
+            // Push data to file if it exceeds the maximum steps parameter
+            // Only needs to be done if recording a step. Purge afterwards
+            if self.time_vector.len() >= self.max_steps 
+            && self.max_steps > 0{
+                let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
+                self.to_csv(&filepath);
+            }
+        }
 
     }
 
-    pub fn to_csv(&self, filepath: &str) {
+    pub fn to_csv(&mut self, filepath: &str) {
         // Setup
         let mut csv: String = "Time,X Position,Y Position,Z Position,x_vel,y_vel,z_vel,Pitch,Roll,Yaw,pitch_vel,roll_vel,yaw_vel".to_string();
         if U > 1 {
@@ -1062,6 +1110,12 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
         // Write to file
         debug!("{}", filepath);
         std::fs::write(filepath, csv).unwrap();
+
+        // Clear data vectors, increase the number of refreshes. 
+        self.time_vector = vec![];
+        self.state_vector = vec![];
+        self.input_vector = vec![];
+        self.num_refresh = self.num_refresh + 1;
  
     }
 
@@ -1069,6 +1123,21 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
         self.time_vector.len() as u64
     }
 } 
+
+impl<const S: usize, const U: usize> Default for DataLogger<S, U> {
+    fn default() -> Self {
+        DataLogger {
+            time_vector: vec![],
+            state_vector: vec![],
+            input_vector: vec![],
+            sample_time: 0.0,
+            last_time: -100.0,
+            max_steps: 0,
+            num_refresh: 0,
+            storage_directory: "data/test/test".to_string(),
+        }
+    }
+}
 
 /// Function to transform nalgebra point to list of floats
 fn get_point_as_list(point: na::Point3<f64>) -> [f64; 3] {

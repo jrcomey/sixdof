@@ -85,7 +85,7 @@ mpl.rcParams.update(params)
 
 # colors = sns.color_palette(palette="bright", n_colors=3)
 
-object_name = "ISS"
+object_name = "ISS_0"
 df = pd.read_csv(f"data/runs/object_{object_name}.csv")
 # fig, pos_plot = plt.subplots()
 # plothusly(

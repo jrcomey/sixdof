@@ -50,7 +50,8 @@ class Vehicle:
 
     def __init__(self, name="", mass=0.0, I = np.array([[0.0, 0.0, 0.0],[0,0,0],[0,0,0]]), *,
                  graphical_elements=[], physics_type="Static", init_state=np.zeros((12,1)),
-                    dependent_components=None, B=None):
+                    dependent_components=None, B=None, recording_sample_time = 0.0, 
+                     max_recorder_buffer_steps=1000, run_name=""):
         # General purpose components
         self.name = name
         self.mass = mass
@@ -100,6 +101,10 @@ class Vehicle:
         # Initialize graphics components
         self.graphical_elements = graphical_elements
 
+        # Initialize data recording elements
+        self.sample_time = recording_sample_time
+        self.max_steps = max_recorder_buffer_steps
+        self.run_name = run_name
         
 
 
@@ -114,7 +119,10 @@ class Vehicle:
             "physicsType": self.physics_type,
             "components": [comp.to_json_str() for comp in self.components],
             "input_size": self.U,
-            "GraphicalElements": [graph.create_json_dict() for graph in self.graphical_elements]
+            "GraphicalElements": [graph.create_json_dict() for graph in self.graphical_elements],
+            "SampleTime": self.sample_time,
+            "MaxSteps": self.max_steps,
+            "RunName": self.run_name
         }
         return data
 
@@ -307,8 +315,24 @@ def test_constellation_scenario():
         PointMassGravity(mass=5.97219E24),
     ]
 
+    run_name = "test_constellation"
+    sample_time = 1.0
+    max_steps = 1000
+
     objects = []
     longitudes = np.linspace(0, 360, 20)
+
+    earth_graphical = Vehicle(
+        name="earth",
+        mass=0,
+        # graphical_path = "data/test_object/default_sphere.obj",
+        physics_type="Static",
+        graphical_elements=[GraphicalElement("EarthModel", "data/test_object/default_sphere.obj", [0,0,0], [0,0,0], [0,0,0], [0,0,1,1], [6.378E6*1E-6,6.378E6*1E-6,6.378E6*1E-6])],
+        run_name=run_name,
+        recording_sample_time=sample_time,
+        max_recorder_buffer_steps=max_steps
+    )
+    objects.append(earth_graphical)
     for i, longitude in enumerate(longitudes):
 
         r_iss, v_iss = keplerian_to_cartesian(a=414+6.378E3, e=0.0009143, i=np.deg2rad(51.6367), Ω=np.deg2rad(longitude), ω=np.deg2rad(50.0139), ν=np.deg2rad(310.1651),μ=398600.4418)
@@ -337,22 +361,19 @@ def test_constellation_scenario():
             # graphical_path="data/test_object/default_cube.obj", 
             physics_type="RK4",
             init_state= init_state,
-            graphical_elements=[GraphicalElement("CubeModel", "data/test_object/default_cube.obj", [0,0,0], [0,0,0], [0,0,0], [1,0,0,1], [100E3*1E-6,100E3*1E-6,100E3*1E-6])]
+            graphical_elements=[GraphicalElement("CubeModel", "data/test_object/default_cube.obj", [0,0,0], [0,0,0], [0,0,0], [1,0,0,1], [100E3*1E-6,100E3*1E-6,100E3*1E-6])],
+            run_name=run_name,
+            recording_sample_time=sample_time,
+            max_recorder_buffer_steps=max_steps
         )
         objects.append(mass_sim_ISS)
 
-    earth_graphical = Vehicle(
-        name="earth",
-        mass=0,
-        # graphical_path = "data/test_object/default_sphere.obj",
-        physics_type="Static",
-        graphical_elements=[GraphicalElement("EarthModel", "data/test_object/default_sphere.obj", [0,0,0], [0,0,0], [0,0,0], [0,0,1,1], [6.378E6*1E-6,6.378E6*1E-6,6.378E6*1E-6])]
-    )
-    objects.append(earth_graphical)
+    
 
 
-    scene = Scenario(objects=objects, environments=environments, min_dt=1E-3, end_time=1*60*90)
+    scene = Scenario(scenario_name=run_name, objects=objects, environments=environments, min_dt=1E-3, end_time=15)
     scene.create_run_json()
+
 
 if __name__ == "__main__":
     test_constellation_scenario()
