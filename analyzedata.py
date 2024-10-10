@@ -2,6 +2,10 @@ import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+import glob
+import os
+from collections import defaultdict
+import re
 # import seaborn as sns
 
 def plothusly(ax, x, y, *, xtitle='', ytitle='',
@@ -85,8 +89,81 @@ mpl.rcParams.update(params)
 
 # colors = sns.color_palette(palette="bright", n_colors=3)
 
-object_name = "ISS"
-df = pd.read_csv(f"data/runs/object_{object_name}.csv")
+object_name = "ISS_0"
+# df = pd.read_csv(f"data/runs/object_{object_name}.csv")
+# df = pd.read_csv("data/runs/test_constellation/object_0_ISS_0_")
+
+# filelist = glob.glob("data/runs/test_constellation/object_0_ISS_0_" + "*.csv")
+
+# li = []
+
+# for filename in filelist:
+
+#     df = pd.read_csv(filename, index_col=None, header=0, usecols=[0,5])
+
+#     li.append(df)
+
+# df = pd.concat(li, axis=0, ignore_index=True)
+
+# REVISIT ME:
+
+def combine_csv_files(dir):
+    """
+    Combines CSV files for each object into a single CSV file.
+
+    Args:
+    input_directory (str): Path to the directory containing the input CSV files.
+    output_directory (str): Path to the directory where the combined CSV files will be saved.
+
+    Returns:
+    None
+    """
+    # Ensure output directory exists
+    input_directory = dir
+    output_directory = dir
+    os.makedirs(output_directory, exist_ok=True)
+
+        # Dictionary to store DataFrames for each object
+    object_data = defaultdict(list)
+
+    # Regular expression to extract object_id from filename
+    pattern = r'(.+?)_\d+\.csv$'
+
+    # List to store files to be deleted
+    files_to_delete = []
+
+    # Iterate over all CSV files in the input directory
+    for filename in sorted(os.listdir(input_directory)):
+        if filename.endswith('.csv'):
+            match = re.match(pattern, filename)
+            if match:
+                object_id = match.group(1)
+                file_path = os.path.join(input_directory, filename)
+                df = pd.read_csv(file_path)
+                object_data[object_id].append(df)
+                files_to_delete.append(file_path)
+
+    # Combine DataFrames for each object
+    combined_data = []
+    for object_id, dataframes in object_data.items():
+        combined_df = pd.concat(dataframes, ignore_index=True)
+        combined_data.append((object_id, combined_df))
+
+    # Delete original CSV files
+    for file_path in files_to_delete:
+        try:
+            os.remove(file_path)
+            print(f"Deleted: {file_path}")
+        except OSError as e:
+            print(f"Error deleting {file_path}: {e}")
+
+    return combined_data
+
+data = combine_csv_files(path:="data/runs/test_constellation/")
+df = pd.read_csv(path+"object_1_ISS_0_combined.csv")
+df.head()
+
+
 # fig, pos_plot = plt.subplots()
 # plothusly(
 #     pos_plot, 
