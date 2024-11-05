@@ -65,7 +65,7 @@ fn main() -> Result<(), std::io::Error> {
     // sim.add_environment(Box::new(environments::GravitationalField::PointMass { mass:5.97219E24, soi_radius: 0.0, position: na::Point3::origin() }));
     
     let mut sim = sixdof::Sim::load_scenario("data/todo/");
-    // sim.datacom_start("127.0.0.1:8080").expect("No connectioned established.");
+    // sim.datacom_start("10.0.0.107:8080").expect("No connectioned established.");
     // sim.run_until(30.0*5400.0).expect("Sim failed!");
     sim.run();
     // // println!("{}", sim.scene_initialization_to_datacom());

@@ -318,11 +318,11 @@ def test_constellation_scenario():
     ]
 
     run_name = "test_constellation"
-    sample_time = 0
-    max_steps = int(90E9)
+    sample_time = 60
+    max_steps = 1024
 
     objects = []
-    longitudes = np.linspace(0, 360, 20)
+    longitudes = np.linspace(0, 360, 10)
 
     earth_graphical = Vehicle(
         name="earth",
@@ -373,9 +373,9 @@ def test_constellation_scenario():
     
 
 
-    scene = Scenario(scenario_name=run_name, objects=objects, environments=environments, min_dt=1E-3, end_time=90)
+    scene = Scenario(scenario_name=run_name, objects=objects, environments=environments, min_dt=1E-3, end_time=7*60*60*24)
     scene.create_run_json()
 
 
 if __name__ == "__main__":
-    test_scenario()
+    test_constellation_scenario()

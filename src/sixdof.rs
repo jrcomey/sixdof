@@ -74,11 +74,11 @@ impl Sim {
 
     /// Runs sum until given time.
     pub fn run_until(&mut self, end_time: f64) -> Result<(), Error>{
-        info!("Running sim until {}", end_time);
+        info!("Running sim until t={} seconds.", end_time);
         self.end_time = end_time;
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
         let mut graphical_frame_counter: u64 = 100;
-        let next_update = Duration::from_micros(16_667);
+        let next_update = Duration::from_micros(33_333);
         let mut last_update_time = Instant::now();
 
         // Initialize random other vectors
@@ -108,13 +108,13 @@ impl Sim {
 
             // If it's a graphical step, generate an update packet and send it over network.
             // Only try this if the sim is supposed to be graphical.
-            let time_check = Instant::now();
 
             if self.is_gui {
+                let time_check = Instant::now();
                 if time_check.duration_since(last_update_time) >= next_update {
                     let packet = self.datacom_update_packet();
                     // std::thread::sleep(Duration::from_millis(500));
-                    self.datacom_send_packet("127.0.0.1:8081", &packet)?;
+                    self.datacom_send_packet("10.0.0.107:8081", &packet)?;
                     // graphical_frame_counter = 0;
                     last_update_time = time_check;
                 }
@@ -215,7 +215,7 @@ impl Sim {
                         _ => panic!("Unsupported number of inputs when creating vehicle")
                     };
                     Sim.add_object(vehicle);
-                    debug!("Loaded object {}", obj["name"].as_str().unwrap());
+                    // debug!("Loaded object {}", obj["name"].as_str().unwrap());
                 }
             }
             _ => {}
@@ -255,8 +255,9 @@ impl Sim {
     /// Creates JSON for DATACOM initialziation.
     pub fn initialize_datacom_json(&mut self) -> Value {
             let mut entities: Vec<serde_json::Value> = vec![];
-            for i in 0..self.objects.len(){
-                let temp = self.get_object(i).datacom_json_initialize();
+            for object in &mut self.objects{
+                debug!("Object name: {}", object.get_name());
+                let temp = object.datacom_json_initialize();
                 match &temp {
                     Some(Value) => entities.push(temp.expect("You shouldn't see this! ")),
                     _ => (),
@@ -357,6 +358,7 @@ impl Sim {
         // Generate initial data JSON and attempt to connect to DATACOM
         let initialization_packet = self.initialize_datacom_json();
         self.datacom_send_packet(datacom_addr, &initialization_packet.to_string())?;
+        debug!("Inititialization Packet: {}", initialization_packet);
         info!("Initialization packet transmitted.");
         // Retrieve and send model files      
         // std::thread::sleep(Duration::from_millis(1000));
@@ -614,7 +616,7 @@ impl<const U: usize> Vehicle<U> {
             _=> "",
         };
 
-        let storage_directory = format!("data/runs/{}/object_{}_{}", run_name, 0, name);
+        let storage_directory = format!("data/runs/{}/object_{}_{}", run_name, id, name);
 
         let mut data_recorder = DataLogger::<12,U>::new(sample_time, max_steps as usize, &storage_directory);
 
@@ -688,6 +690,7 @@ impl<const U: usize> Vehicle<U> {
     }
 
     pub fn set_model(&mut self, new_graphical_info: GraphicalData) {
+        self.is_graphical=true;
         self.graphical_info = new_graphical_info;
     }
     
@@ -824,7 +827,7 @@ impl<const U: usize> Simulatable for Vehicle<U> {
     }
 
     fn export_data(&mut self, filepath: &str) {
-        self.data.to_csv(&filepath);
+        self.data.to_csv();
     }
 
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>) {
@@ -918,15 +921,17 @@ impl<const U: usize> Default for Vehicle<U> {
         }
     }
 }
+
+// UTILITIES
+
+/// Physics type classifier for simulated objects
 pub enum PhysicsType {
     Static,
-    StaticTrajectory,
+    StaticTrajectory,   // Currently unused
     StateSpace,
 }
 
-
-
-
+/// Activation enum. Can render a component active or inactive.
 pub enum Status {
     Active,
     Inactive
@@ -938,6 +943,7 @@ impl Status {
     }
 }
 
+/// Enum based integrator option.
 pub enum Integrator {
     ForwardEuler,
     RK4,
@@ -1076,22 +1082,23 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             // Only needs to be done if recording a step. Purge afterwards
             if self.time_vector.len() >= self.max_steps 
             && self.max_steps > 0{
-                let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
-                self.to_csv(&filepath);
+                // let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
+                self.to_csv();
             }
         }
 
     }
 
-    pub fn to_csv(&mut self, filepath: &str) {
+    pub fn to_csv(&mut self) {
         // Setup
+        let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
         let mut csv: String = "Time,X Position,Y Position,Z Position,x_vel,y_vel,z_vel,Pitch,Roll,Yaw,pitch_vel,roll_vel,yaw_vel".to_string();
         if U > 1 {
             for i in (&self.input_vector[0]) {
                 csv.push_str(&format!(",U_{}", i));
             }
-            csv.push_str("\n");
         }
+        csv.push_str("\n");
         
 
         // Iterate over all datapoints

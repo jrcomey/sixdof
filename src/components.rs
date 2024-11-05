@@ -4,6 +4,7 @@ use na::{Dyn, SMatrix};
 use serde_json::{json, Value};
 use crate::sixdof::Integrator;
 use crate::graphical;
+use std::f64::consts::PI;
 
 
 pub trait ComponentPart {
@@ -14,22 +15,53 @@ pub trait ComponentPart {
 }
 
 pub struct ElectricalMotor {
-    J: f64,
-    Kv: f64,
-    Kt: f64,
-    R: f64,
-    L: f64,
-    N: f64,
-    omega: f64,
+    J: f64,                                         // Moment of Inertia [kg*m^2]
+    Kv: f64,                                        // Back EMF constant
+    Kt: f64,                                        // Motor Torque Constant
+    R: f64,                                         // Motor Phase Resistance
+    L: f64,                                         // Motor Phase Inductance
+    N: f64,                                         // Number of pole pairs
+    theta: f64,                                     // Motor Rotational Position [rad]
+    omega: f64,                                     // Motor rotational speed
+    relative_position: na::Vector3<f64>,            // Motor position relative to parent
+    relative_rotation: na::Vector3<f64>,            // Motor rotation relative to parent
 }
 
 impl ElectricalMotor {
-    pub fn new() -> ElectricalMotor {
-        todo!();
+    pub fn new(J: f64, Kv: f64, Kt: f64, R: f64, L: f64, N: f64, relative_position: na::Vector3<f64>, relative_rotation: na::Vector3<f64>) -> ElectricalMotor {
+        
+        ElectricalMotor { 
+            J: J,
+            Kv: Kv,
+            Kt: Kt,
+            R: R,
+            L: L,
+            N: N,
+            theta: 0.0,
+            omega: 0.0,
+            relative_position: relative_position,
+            relative_rotation: relative_rotation,
+        }
     }
 
     pub fn new_from_json() -> ElectricalMotor {
         todo!();
+    }
+
+    /// Limits rotation to bounds of [-PI, PI]
+    /// 
+    /// Floating point precision is higher closer to 0.0
+    pub fn bounds_check(&mut self) {
+        if self.theta < -PI {
+            while self.theta < -PI {
+                self.theta = self.theta + 2.0*PI;
+            }
+        }
+        else if self.theta > PI {
+            while self.theta > PI {
+                self.theta = self.theta - 2.0*PI;
+            }
+        }
     }
 
 }
