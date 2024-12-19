@@ -19,6 +19,7 @@ use std::io::{Read, Write};
 use crate::graphical::{self, GraphicalData};
 use std::fs::File;
 use crate::components::*;
+use crate::fc;
 
 /// Data transmission constant for chunk size, set at 4kB
 const CHUNK_SIZE: usize = 4096;
@@ -77,9 +78,13 @@ impl Sim {
         info!("Running sim until t={} seconds.", end_time);
         self.end_time = end_time;
         let mut bar = ProgressBar::new((end_time / self.dt) as u64);
-        let mut graphical_frame_counter: u64 = 100;
-        let next_update = Duration::from_micros(33_333);
+        let mut graphical_frame_counter: u64 = 0;
+        let graphical_update_max = 5000;
+        // let next_update = Duration::from_micros(33_333);
+        let next_update = Duration::from_millis(100);
         let mut last_update_time = Instant::now();
+
+        debug!("Is graphical? {}", self.is_gui);
 
         // Initialize random other vectors
         for object in &mut self.objects {
@@ -111,15 +116,17 @@ impl Sim {
 
             if self.is_gui {
                 let time_check = Instant::now();
-                if time_check.duration_since(last_update_time) >= next_update {
+                if time_check.duration_since(last_update_time) >= next_update
+                || graphical_frame_counter >= graphical_update_max {
+                    // debug!("SENDING PACKET");
                     let packet = self.datacom_update_packet();
                     // std::thread::sleep(Duration::from_millis(500));
                     self.datacom_send_packet("10.0.0.107:8081", &packet)?;
-                    // graphical_frame_counter = 0;
-                    last_update_time = time_check;
+                    graphical_frame_counter = 0;
+                    last_update_time = Instant::now();
                 }
                 else {
-                    // graphical_frame_counter += 1;
+                    graphical_frame_counter += 1;
                 }
             }
             self.current_time = self.current_time + self.dt;
@@ -131,7 +138,14 @@ impl Sim {
     }
 
     pub fn run(&mut self) {
-        self.run_until(self.end_time);
+        let _ = self.run_until(self.end_time);
+        // Send final update packet
+        if self.is_gui{
+            let packet = self.datacom_update_packet();
+            debug!("Final Packet: {}", packet);
+            self.datacom_send_packet("10.0.0.107:8081", &packet).unwrap();
+        }
+        
     }
 
     /// Adds an object to the simulation.
@@ -212,7 +226,7 @@ impl Sim {
                         18 => Box::new(Vehicle::<18>::load_from_json_parsed(&obj)),
                         19 => Box::new(Vehicle::<19>::load_from_json_parsed(&obj)),
                         20 => Box::new(Vehicle::<20>::load_from_json_parsed(&obj)),
-                        _ => panic!("Unsupported number of inputs when creating vehicle")
+                        _ => panic!("Unsupported number of inputs when creating vehicle: {}", U)
                     };
                     Sim.add_object(vehicle);
                     // debug!("Loaded object {}", obj["name"].as_str().unwrap());
@@ -230,8 +244,9 @@ impl Sim {
                         "PointMassGravity" => {
                             Sim.add_environment(Box::new(environments::GravitationalField::load_from_json_parsed(environment)))
                             },
-                        "StaticField" => {
-                            ;
+                        "ConstantField" => {
+                            debug!("LOADED POINT MASS");
+                            Sim.add_environment(Box::new(environments::GravitationalField::load_from_json_parsed(environment)))
                         },
                         _ => {},
                     };
@@ -617,8 +632,37 @@ impl<const U: usize> Vehicle<U> {
         };
 
         let storage_directory = format!("data/runs/{}/object_{}_{}", run_name, id, name);
+        debug!("Storage Directory: {}", storage_directory);
 
         let mut data_recorder = DataLogger::<12,U>::new(sample_time, max_steps as usize, &storage_directory);
+
+        let mut components: Vec<Box<dyn ComponentPart>> = vec![];
+        match &json_parsed["components"] {
+            Value::Array(data_vector) => {
+                for obj in data_vector {
+                    // debug!("Component String: {}", obj);
+                    let component_type = obj["component_type"].as_str().unwrap();
+                    debug!("Component Type: {}", component_type);
+                    match component_type {
+                        "IdealThruster" => {
+                            components.push(Box::new(IdealThruster::new()));
+                        },
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let fc: Box<dyn fc::FlightControl<U>> = match &json_parsed["flight_controller"] { 
+            Value::String(fc_type) => {
+                debug!("NO FLIGHT CONTROLLER FOUND");
+                Box::new(NullComputer::new())
+            }
+            _=> {
+                Box::new(FlightComputer::new_from_json(&json_parsed["flight_controller"]))
+            }
+        };
 
         let mut vehicle = Vehicle::<U> {
             name: name.to_string(),
@@ -630,11 +674,11 @@ impl<const U: usize> Vehicle<U> {
             C: na::SMatrix::zeros(),
             x: x,
             u: na::SMatrix::zeros(),
-            fc: Box::new(NullComputer::new()),
+            fc: fc,
             position: na::Point3::<f64>::origin(),
             rotation: na::Point3::<f64>::origin(),
             last_time: -1.0,
-            motors: vec![],
+            motors: components,
             integrator: integrator,
             physics_type: physics_type,
             is_graphical: false,
@@ -730,6 +774,7 @@ impl<const U: usize> Simulatable for Vehicle<U> {
 
     fn get_xdot(&self, x: &State, t: &f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State {
         let x_dot_env = self.calculate_environmental_acceleration(environment_vector); 
+        // debug!("B*u: {}", self.B*self.get_u(*x));
         self.A*x
             + self.B*self.get_u(*x)
             + x_dot_env
@@ -827,7 +872,7 @@ impl<const U: usize> Simulatable for Vehicle<U> {
     }
 
     fn export_data(&mut self, filepath: &str) {
-        self.data.to_csv();
+        self.data.to_csv(filepath);
     }
 
     fn add_component(&mut self, new_component: Box<dyn ComponentPart>) {
@@ -840,10 +885,10 @@ impl<const U: usize> Simulatable for Vehicle<U> {
             let mut model_list: Vec<Value> = vec![];
             let top_level_model = self.graphical_info.get_model_value();
             model_list.push(top_level_model);
-            for i in 0..self.motors.len() {
-                let temp = self.get_component(i).datacom_get_model_json();
-                model_list.push(temp);
-            }
+            // for i in 0..self.motors.len() {
+            //     let temp = self.get_component(i).datacom_get_model_json();
+            //     model_list.push(temp);
+            // }
             
             let json_file = Option::Some(json!({
                 "Name": self.name,
@@ -1082,14 +1127,14 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             // Only needs to be done if recording a step. Purge afterwards
             if self.time_vector.len() >= self.max_steps 
             && self.max_steps > 0{
-                // let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
-                self.to_csv();
+                let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
+                self.to_csv(&filepath);
             }
         }
 
     }
 
-    pub fn to_csv(&mut self) {
+    pub fn to_csv(&mut self, filepath: &str) {
         // Setup
         let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
         let mut csv: String = "Time,X Position,Y Position,Z Position,x_vel,y_vel,z_vel,Pitch,Roll,Yaw,pitch_vel,roll_vel,yaw_vel".to_string();
