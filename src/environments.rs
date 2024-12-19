@@ -112,6 +112,22 @@ impl GravitationalField {
                     json["soi_radius"].as_f64().unwrap(), 
                     position_vec)
             },
+            "ConstantField" => {
+                let mut direction_vec = na::Vector3::<f64>::new(0.0, 0.0, 0.0);
+                let direction_temp: Vec<_> = json["direction"]
+                    .as_array()
+                    .unwrap()
+                    .into_iter()
+                    .collect();
+                for (i, direction) in direction_temp.iter().enumerate() {
+                    direction_vec[i] = direction.as_f64().unwrap();
+                }
+
+                GravitationalField::Constant { 
+                    acceleration: json["acceleration"].as_f64().unwrap(), 
+                    direction: direction_vec
+                }
+            },
             _ => {
                 GravitationalField::Constant { acceleration: 0.0, direction: na::zero() }
             }
@@ -160,7 +176,7 @@ impl EnviromentalEffect for GravitationalField {
                 ])
             },
             GravitationalField::Constant { acceleration, direction } => {
-                debug!("CONSTANT FIELD USED");
+                // debug!("CONSTANT FIELD USED");
                 let acc_vector = (*acceleration)*direction;
                 State::from_row_slice(&[
                     0.0,                    // x_dot
