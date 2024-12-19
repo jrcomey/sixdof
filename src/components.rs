@@ -1,10 +1,11 @@
-use crate::datatypes::*;
+use crate::{datatypes::*, sixdof};
 use nalgebra as na;
 use na::{Dyn, SMatrix};
 use serde_json::{json, Value};
 use crate::sixdof::Integrator;
 use crate::graphical;
 use std::f64::consts::PI;
+// use serde_json::{json, Value};
 
 
 pub trait ComponentPart {
@@ -25,6 +26,9 @@ pub struct ElectricalMotor {
     omega: f64,                                     // Motor rotational speed
     relative_position: na::Vector3<f64>,            // Motor position relative to parent
     relative_rotation: na::Vector3<f64>,            // Motor rotation relative to parent
+    i: f64,                                          // Current in the windings
+    last_time: f64                                  // Last time
+    // integrator: sixdof::Integrator
 }
 
 impl ElectricalMotor {
@@ -41,6 +45,9 @@ impl ElectricalMotor {
             omega: 0.0,
             relative_position: relative_position,
             relative_rotation: relative_rotation,
+            i: 0.0,
+            last_time: 0.0,
+            // integrator: Integrator::ForwardEuler,
         }
     }
 
@@ -64,6 +71,78 @@ impl ElectricalMotor {
         }
     }
 
+    fn calculate_back_emf(&self) -> f64 {
+        self.Kt*self.omega
+    }
+
+    fn calculate_torque(&mut self, target_speed: f64, voltage: f64, t: f64) -> na::Vector3<f64> {
+        // Calculate dt
+        let dt = t - self.last_time;
+        self.last_time = t;
+        
+        // Electrical dynamics
+        // di/dt = (V - Ke*omega - R*i)/L
+        let back_emf = self.Kv * self.omega;
+        let di_dt = (voltage - back_emf - self.R * self.i) / self.L;
+        self.i += di_dt * dt;
+        
+        // Mechanical dynamics
+        // dω/dt = (Kt*i - B*ω)/J
+        // Using a simple viscous damping model where B is proportional to speed
+        let damping = 0.1 * self.omega;  // Simplified damping coefficient
+        let torque = self.Kt * self.i;
+        let domega_dt = (torque - damping) / self.J;
+        
+        let rotation_matrix = na::Rotation3::from_euler_angles(self.relative_rotation[0], self.relative_rotation[1], self.relative_rotation[2]);
+        let torque_vec = rotation_matrix * na::Vector3::new(torque, 0.0, 0.0);
+
+        // Update motor speed and position
+        self.omega += domega_dt * dt;
+        self.theta += self.omega * dt;
+        
+        return torque_vec
+    }
+}
+
+impl ComponentPart for ElectricalMotor {
+    fn datacom_get_model_json(&self) -> Value {
+        todo!()
+    }
+
+    fn get_force_on_parent(&self) -> SMatrix<f64, 12, 1> {
+        // Calculate thrust force (simplified model assuming propeller)
+        // F = Kt * i * omega for crude approximation
+        let thrust_magnitude = self.Kt * self.i * self.omega.abs();
+        
+        // Convert thrust to body frame using relative rotation
+        // Assuming relative_rotation contains roll, pitch, yaw angles
+        let rotation_matrix = na::Rotation3::from_euler_angles(self.relative_rotation[0], self.relative_rotation[1], self.relative_rotation[2]);
+        let thrust_vector = rotation_matrix * na::Vector3::new(thrust_magnitude, 0.0, 0.0);
+        
+        let parent_force = na::SMatrix::<f64, 12, 1>::from_row_slice(&[
+            0.0,
+            0.0,
+            0.0,
+            thrust_vector[0],
+            thrust_vector[1],
+            thrust_vector[2],
+            0.0,
+            0.0,
+            0.0,
+            thrust_vector[0]*self.relative_position[0],
+            thrust_vector[1]*self.relative_position[1],
+            thrust_vector[2]*self.relative_position[2],
+        ]);
+        return parent_force
+    }
+
+    fn set_force(&mut self, new_force:f64) {
+        todo!();
+    }
+
+    fn update_to_time(&mut self, y: Vec<f64>, t: f64) {
+        todo!();
+    }
 }
 
 pub struct RocketMotor {
@@ -127,6 +206,46 @@ impl IdealThruster {
     pub fn get_xdot(&self, y: &na::SMatrix<f64, 1, 1>, t: &f64) -> na::SMatrix<f64, 1, 1>{
         return (na::SMatrix::<f64, 1, 1>::new(self.force) - y)/self.time_const;
     }
+
+    pub fn set_time_const(&mut self, new_time_const: f64) {
+        self.time_const = new_time_const;
+    }
+
+    pub fn get_force(&self) -> f64 {
+        self.force
+    }
+
+    pub fn load_from_json_parsed(json_parsed: Value) -> Self {
+
+        let time_const = json_parsed["time_constant"].as_f64().unwrap();
+        let position_vec: Vec<f64> = json_parsed["position"]
+            .as_array()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+        let position = na::Vector3::new(position_vec[0], position_vec[1], position_vec[2]);
+
+        let orientation_vec: Vec<f64> = json_parsed["orientation"]
+            .as_array()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+        let orientation = na::Vector3::new(orientation_vec[0], orientation_vec[1], orientation_vec[2]);
+        let orientation = na::UnitVector3::new_normalize(orientation);
+
+        IdealThruster {
+            time_const: time_const,
+            force: 0.0,
+            set_force: 0.0,
+            last_time: 0.0,
+            position: position,
+            orientation: orientation,
+            integrator: Integrator::ForwardEuler,
+            ..Default::default()
+        }
+    }
 }
 
 impl ComponentPart for IdealThruster {
@@ -151,7 +270,13 @@ impl ComponentPart for IdealThruster {
     }
 
     fn update_to_time(&mut self, y: Vec<f64>, t: f64) {
-        self.force = self.set_force;
+        let dt = t-self.last_time;
+        // let force_set = y[0];
+        let force_at_time_step = (self.set_force + (self.force- self.set_force) * (-1.0*dt/self.time_const).exp());
+
+        // self.force = self.set_force;
+
+        self.force = force_at_time_step;
     }
 
     fn set_force(&mut self, new_force: f64) {
