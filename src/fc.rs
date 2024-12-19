@@ -1,3 +1,5 @@
+use sj::Value;
+
 use crate::datatypes::*;
 
 pub struct FlightComputer<const U: usize> {
@@ -23,6 +25,35 @@ impl<const U: usize> FlightComputer<U> {
             K: K
         }
     }
+
+    pub fn new_from_json(json_parsed: &Value) -> Self {
+        
+        let sample_time = match &json_parsed["sample_time"] {
+            Value::Number(t_s) => {t_s.as_f64().unwrap()},
+            _ => {0.0}
+        };
+
+        // Unimplemented
+        let sensors = vec![];
+
+        let K_dat: Vec<f64> = json_parsed["K"]
+            .as_array()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+
+        let K: na::SMatrix<f64, U, 12> = na::SMatrix::from_row_slice(&K_dat[..]);
+
+        FlightComputer{
+            sample_time: sample_time,
+            t_last_updated: 0.0,
+            sensors: sensors,
+            cmd_inputs: Inputs::zeros(),
+            K: K
+        }
+        
+    }
 }
 
 impl<const U: usize> FlightControl<U> for FlightComputer<U> {
@@ -31,8 +62,9 @@ impl<const U: usize> FlightControl<U> for FlightComputer<U> {
     }
 
     fn calculate_u(&self, current_state: State) -> Inputs<U> {
-        // debug!("{}", self.K*current_state);
-        self.K*current_state
+        // debug!("FC OUTPUT: {}", self.K*current_state);
+        let err: State = State::zeros() - current_state;
+        self.K*err
     }
 }
 
