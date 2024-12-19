@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # import seaborn as sns
-
+object_name = "drone"
 def plothusly(ax, x, y, *, xtitle='', ytitle='',
               datalabel='', title='', linestyle='-',
               marker=''):
@@ -35,7 +35,6 @@ def plothusly(ax, x, y, *, xtitle='', ytitle='',
     out : Resultant graph.
 
     """
-
     ax.set_xlabel(xtitle)
     ax.set_ylabel(ytitle)
     ax.set_title(title)
@@ -56,7 +55,6 @@ def plothus(ax, x, y, *, datalabel='', linestyle = '-',
     out = ax.plot(x, y, zorder=1, label=datalabel, linestyle = linestyle,
                   marker = marker)
     ax.legend(loc='best')
-
     return out
 
 plt.style.use("default")
@@ -93,7 +91,7 @@ mpl.rcParams.update(params)
 
 # colors = sns.color_palette(palette="bright", n_colors=3)
 
-object_name = "ISS_0"
+# object_name = "ISS_0"
 # df = pd.read_csv(f"data/runs/object_{object_name}.csv")
 # df = pd.read_csv("data/runs/test_constellation/object_0_ISS_0_")
 
@@ -143,7 +141,7 @@ def combine_csv_files(dir):
 
     # Iterate over all CSV files in the input directory
     for filename in sorted(os.listdir(input_directory)):
-        print(filename)
+        # print(filename)
         if filename.endswith('.csv'):
             match = re.match(pattern, filename)
             if match:
@@ -159,7 +157,7 @@ def combine_csv_files(dir):
         output_file = os.path.join(output_directory, f"{object_id}_combined.csv")
         combined_df.to_csv(output_file, index=False)
         combined_df = combined_df.sort_values("Time", ascending=True)
-        print(f"Combined CSV for {object_id} saved to {output_file}")
+        # print(f"Combined CSV for {object_id} saved to {output_file}")
         combined_list.append(DataStorage(object_id, combined_df))
 
     # [os.remove(old_file) for old_file in to_delete]
@@ -257,55 +255,58 @@ def animate_trajectories(combined_data):
 
     return fig
 
-data = combine_csv_files(path:="data/runs/test_constellation/")
+data = combine_csv_files(path:="data/runs/test_drone/")
+# print(data[0].data.head())
 # data = [pd.read_csv("data/runs/test_constellation/"+file) for file in os.listdir("data/runs/test_constellation/")]
-# print(data[1].data.head())
+# print(data[0].data.head())
 # df = data[1]
 
 # Generate static plot
 static_fig = plot_trajectories(data)
-static_fig.show()
+# static_fig.show()
 
 # Generate animated plot
-animated_fig = animate_trajectories(data)
-animated_fig.show()
+# animated_fig = animate_trajectories(data)
+# animated_fig.show()
 
-static_fig.write_html(path+"static_trajectories.html")
-animated_fig.write_html(path+"animated_trajectories.html")
+# static_fig.write_html(path+"static_trajectories.html")
+# animated_fig.write_html(path+"animated_trajectories.html")
 
 
-# # fig, pos_plot = plt.subplots()
-# # plothusly(
-# #     pos_plot, 
-# #     obj_data["time"], 
-# #     obj_data["x_pos"], 
-# #     xtitle="Time [sec]",
-# #     ytitle="Position [m]",
-# #     title="Object Null Simulated Position",
-# #     linestyle='-',
-# #     datalabel="X Position")\
-# # plothus(pos_plot, obj_data["time"], obj_data["y_pos"], datalabel="Y Position")
-# # plothus(pos_plot, obj_data["time"], obj_data["z_pos"], datalabel="Z Position")
 
-# meters = mpl.ticker.EngFormatter("m")
-# newtons = mpl.ticker.EngFormatter("N")
-# seconds = mpl.ticker.EngFormatter("s")
-# radians = mpl.ticker.EngFormatter("rad")
+# fig, pos_plot = plt.subplots()
+# plothusly(
+#     pos_plot, 
+#     obj_data["time"], 
+#     obj_data["x_pos"], 
+#     xtitle="Time [sec]",
+#     ytitle="Position [m]",
+#     title="Object Null Simulated Position",
+#     linestyle='-',
+#     datalabel="X Position")
+# plothus(pos_plot, obj_data["time"], obj_data["y_pos"], datalabel="Y Position")
+# plothus(pos_plot, obj_data["time"], obj_data["z_pos"], datalabel="Z Position")
 
-# # Position plot
-# fig, zplot = plt.subplots()
-# plothusly(zplot, df["Time"], df["Z Position"], 
-#           xtitle="Time [sec]",
-#           ytitle="Position [m]]", 
-#           datalabel="Z Position", 
-#           title="Sim Obj Position")
-# plothus(zplot, df["Time"], df["Y Position"], datalabel="Y Position")
-# plothus(zplot, df["Time"], df["X Position"], datalabel="X Position")
+meters = mpl.ticker.EngFormatter("m")
+newtons = mpl.ticker.EngFormatter("N")
+seconds = mpl.ticker.EngFormatter("s")
+radians = mpl.ticker.EngFormatter("rad")
 
-# zplot.xaxis.set_major_formatter(seconds)
-# zplot.yaxis.set_major_formatter(meters)
+df = data[0].data
+# Position plot
+fig, zplot = plt.subplots()
+plothusly(zplot, df["Time"], df["Z Position"], 
+          xtitle="Time [sec]",
+          ytitle="Position [m]]", 
+          datalabel="Z Position", 
+          title="Sim Obj Position")
+plothus(zplot, df["Time"], df["Y Position"], datalabel="Y Position")
+plothus(zplot, df["Time"], df["X Position"], datalabel="X Position")
 
-# fig.savefig(f"data/runs/object_{object_name}_pos.png")
+zplot.xaxis.set_major_formatter(seconds)
+zplot.yaxis.set_major_formatter(meters)
+
+fig.savefig(f"data/runs/test_drone/object_{object_name}_pos.png")
 
 # #%%###########################
 # # Attitude plots
