@@ -31,7 +31,7 @@ class Scenario:
             "environments": [env.create_json_dict() for env in self.environments],
             "datacomPort": self.datacom_port,
         }
-        print(scenario_json)
+        # print(scenario_json)
 
         # Make directories for sims if they don't already exist
         if not os.path.isdir(input:=f"data/todo"):
@@ -43,6 +43,54 @@ class Scenario:
             file.write(json.dumps(scenario_json))
 
 
+class Component:
+
+    def __init__(self, name="", ):
+        pass
+
+    def create_json_dict():
+        data = {
+            "default_component": 0,
+        }
+
+        return data
+
+    def to_json_str(self):
+        return json.dumps(self.create_json_dict())
+
+class IdealThruster(Component):
+
+    def __init__(self,*, time_constant=0.01, position=np.array([[0.0, 0.0, 0.0]]), orientation=np.array([[0.0,0.0,0.0]])):
+        self.time_constant = time_constant
+        self.position = position
+        self.orientation = orientation
+
+    def create_json_dict(self):
+        data= {
+            "component_type": "IdealThruster",
+            "time_constant": self.time_constant,
+            "position": sum(self.position.tolist(),[]),
+            "orientation": sum(self.orientation.tolist(),[])
+        }
+        return data
+    
+class FlightComputer:
+
+    def __init__(self, sample_time, sensors, K):
+
+        self.sample_time = sample_time
+        self.K = K
+
+    def create_json_dict(self):
+        data = {
+            "sample_time": self.sample_time,
+            "K": sum(self.K.tolist(), [])
+        }
+        return data
+    
+    def to_json_str(self):
+        return json.dumps(self.create_json_dict())
+        
 
 
 
@@ -50,7 +98,7 @@ class Vehicle:
 
     def __init__(self, name="", mass=0.0, I = np.array([[0.0, 0.0, 0.0],[0,0,0],[0,0,0]]), *,
                  graphical_elements=[], physics_type="Static", init_state=np.zeros((12,1)),
-                    dependent_components=None, B=None, recording_sample_time = 0.0, 
+                    dependent_components=None, B=None, fc=None, recording_sample_time = 0.0, 
                      max_recorder_buffer_steps=1000, run_name=""):
         # General purpose components
         self.name = name
@@ -69,6 +117,8 @@ class Vehicle:
             self.U=1
             self.components=[]
             self.B=np.zeros((12, self.U))
+
+        self.fc = fc
 
         # Generate dynamic components if not static
         if physics_type != "Static":
@@ -117,33 +167,24 @@ class Vehicle:
             "A": sum(self.A.tolist(), []),
             "B": sum(self.B.tolist(), []),
             "physicsType": self.physics_type,
-            "components": [comp.to_json_str() for comp in self.components],
+            "components": [comp.create_json_dict() for comp in self.components],
             "input_size": self.U,
             "GraphicalElements": [graph.create_json_dict() for graph in self.graphical_elements],
             "SampleTime": self.sample_time,
             "MaxSteps": self.max_steps,
             "RunName": self.run_name
         }
+        if self.fc is not None:
+            data["flight_controller"] = self.fc.create_json_dict()
+        else:
+            data["flight_controller"] = "None"
         return data
 
     def to_json_str(self):
         return json.dumps(self.create_json_dict())
 
+    
 
-class Component:
-
-    def __init__():
-        pass
-
-    def create_json_dict():
-        data = {
-            "default_component": 0,
-        }
-
-        return data
-
-    def to_json_str(filename):
-        return json.dumps(self.create_json_dict)
 
 class Environment:
 
@@ -176,6 +217,19 @@ class PointMassGravity(Environment):
             "position": self.position.tolist()
         }
     
+class ConstantField(Environment):
+
+    def __init__(self, acceleration=9.81, direction=np.array([[0.0, 0.0, -1.0]])):
+        self.acceleration = acceleration
+        self.direction=direction
+
+    def create_json_dict(self):
+        return {
+            "type": "ConstantField",
+            "acceleration": self.acceleration,
+            "direction":  sum(self.direction.tolist(),[])
+        }
+
 class GraphicalElement:
 
     def __init__(self, name="DEFAULT", filepath='data/test_boject/default_cube.obj', relative_position=[0,0,0], orientation=[0,0,0], rotation=[0,0,0], color=[1,0,0,1], scale=[1,1,1]):
@@ -376,6 +430,101 @@ def test_constellation_scenario():
     scene = Scenario(scenario_name=run_name, objects=objects, environments=environments, min_dt=1E-3, end_time=7*60*60*24)
     scene.create_run_json()
 
+def test_quadcopter():
+    environments = [
+        # ConstantField(),
+        PointMassGravity(mass=5.97219E24, position=np.array([0.0, 0.0, -6.378E6]))
+    ]
+
+    run_name = "test_drone"
+    sample_time = 0.1
+    max_steps=100000
+    objects=[]
+
+    init_state = np.zeros((12,1))
+
+    I = np.array([
+        [0.0025, 0.0, 0.0],
+        [0.0, 0.0025, 0.0],
+        [0.0, 0.0, 0.005]
+    ])
+
+    K = np.array([
+        [0.0],  # x
+        [0.0],  # y
+        [20.0],  # z
+        [0.0],  # x'
+        [0.0],  # 
+        [1.0],
+        [0.0],
+        [0.0],
+        [0.0],
+        [0.0],
+        [0.0],
+        [0.0],
+    ])
+
+    B = np.array([
+        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        # [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ])
+
+    fc = FlightComputer(sample_time=0.0, sensors=None, K=K)
+    components = [
+        IdealThruster(time_constant=0.01),
+        # IdealThruster(time_constant=0.01)
+    ]
+
+    drone = Vehicle(
+        name="TestDrone",
+        mass=0.25,
+        physics_type="RK4",
+        I=I,
+        dependent_components=components,
+        B=B,
+        graphical_elements=[
+            GraphicalElement("DroneModel", "data/test_object/default_sphere.obj", [0,0,0], [0,0,0], [0,0,0], [1,0,0,1])
+        ],
+        fc=fc,
+        init_state=init_state,
+        recording_sample_time=sample_time,
+        max_recorder_buffer_steps=max_steps,
+        run_name=run_name
+        )
+    
+    objects.append(drone)
+
+    static_cube = Vehicle(
+        name="StaticCube",
+        mass=0.25,
+        physics_type="Static",
+        I=I,
+        graphical_elements=[
+            GraphicalElement("DroneModel", "data/test_object/default_cube.obj", [0,0,0], [0,0,0], [0,0,0], [0.5,0.5,0.5,1])
+        ],
+        init_state=init_state,
+        run_name=run_name
+        )
+    
+    objects.append(static_cube)
+
+    terrain = Vehicle(
+        name="HighPolyTerrain",
+        mass=0,
+        physics_type="Static",
+        I=I,
+        graphical_elements=[
+            GraphicalElement("TerrainMap", "data/test_object/MASADA_HIGHPOLY.obj", [0,0,0], [0,0,0], [0,0,0], [0.0,1.0,0.0,1.0], [1E3, 1E3, 1E3])],
+        init_state=init_state,
+        run_name=run_name
+    )
+    objects.append(terrain)
+
+
+    scene = Scenario(scenario_name=run_name, objects=objects, environments=environments, min_dt=1E-3, end_time=10.0)
+    scene.create_run_json()
 
 if __name__ == "__main__":
-    test_constellation_scenario()
+    # test_scenario()
+    test_quadcopter()
+    # test_constellation_scenario()
