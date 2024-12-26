@@ -1199,3 +1199,15 @@ impl<const S: usize, const U: usize> Default for DataLogger<S, U> {
 fn get_point_as_list(point: na::Point3<f64>) -> [f64; 3] {
     return [point[0], point [1], point[2]];
 }
+
+// ################################################################################################
+
+#[derive(Debug, Deserialize)]
+pub struct NetworkInfo {
+    addresses: Vec<String>,
+    ports: Vec<u16>,
+    timeout_seconds: Duration,
+    last_valid_address: Option<String>,
+    last_valid_port: Option<u16>
+}
+
