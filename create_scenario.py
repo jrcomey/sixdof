@@ -526,5 +526,5 @@ def test_quadcopter():
 
 if __name__ == "__main__":
     # test_scenario()
-    test_quadcopter()
-    # test_constellation_scenario()
+    # test_quadcopter()
+    test_constellation_scenario()
