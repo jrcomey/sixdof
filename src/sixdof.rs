@@ -440,6 +440,7 @@ impl Default for Sim {
     
 }
 
+/// Behavior recquired for any object to be present in the sim
 pub trait Simulatable {
     // Getter and Setter functions
     fn get_name(&self) -> &str;
@@ -922,14 +923,17 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         return Option::Some(cmd_vec);
     }
 
+    /// Getter method for model path
     fn get_model_path(&self) -> &str {
         &self.graphical_info.get_model_path()
     }
 
+    /// Getter method for vehicle physics type.
     fn get_physics_type(&self) -> &PhysicsType {
         &self.physics_type
     }
 
+    /// Setter for vehicle physics type
     fn set_physics_type(&mut self, new_type: PhysicsType) {
         self.physics_type = new_type;
     }
@@ -995,6 +999,7 @@ pub enum Integrator {
 }
 
 impl Integrator {
+    /// Time step integration which accepts a function to get state vector derivative
     pub fn integrate<F, const S: usize>(&self, f: F, y_old: &na::SMatrix<f64, S, 1>, t_last: &f64, t_new: &f64) -> SMatrix<f64, S, 1> 
     where 
         F: Fn(&SMatrix<f64, S, 1>, &f64) -> SMatrix<f64, S, 1>
@@ -1022,7 +1027,7 @@ impl Integrator {
     }
 }
 
-
+/// Function to return a state vector with a negative z component
 fn z_down() -> State {
     na::SMatrix::from_row_slice(&[
         0.0,        // x
@@ -1040,6 +1045,7 @@ fn z_down() -> State {
     ])
 }
 
+/// Function to return a state vector with a negative z acceleration component
 fn z_acc_down() -> State {
     na::SMatrix::from_row_slice(&[
         0.0,        // xdot
@@ -1112,6 +1118,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
         return d;
     }
 
+    /// Function to record data, with checks for sample time.
     pub fn record(&mut self, time: f64, state: na::SMatrix<f64, S, 1>, input: Inputs<U>) {
         
         // Log data if sample time indicates it is ready, or bypass if values are null. 
