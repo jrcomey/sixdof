@@ -70,7 +70,7 @@ params={#FONT SIZES
     # 'legend.fontsize':30,#Legend font size
     'font.family':'sans-serif',
     'font.fantasy':'xkcd',
-    'font.sans-serif':'Helvetica',
+    # 'font.sans-serif':'Helvetica',
     'font.monospace':'Courier',
     #AXIS PROPERTIES
     'axes.titlepad':2*6.0,#title spacing from axis
@@ -255,88 +255,111 @@ def animate_trajectories(combined_data):
 
     return fig
 
-data = combine_csv_files(path:="data/runs/test_drone/")
-# print(data[0].data.head())
-# data = [pd.read_csv("data/runs/test_constellation/"+file) for file in os.listdir("data/runs/test_constellation/")]
-# print(data[0].data.head())
-# df = data[1]
 
-# Generate static plot
-static_fig = plot_trajectories(data)
-# static_fig.show()
+def analyze_scenarios():
+    path = "data/todo/"
+    jobs = os.listdir(path)
 
-# Generate animated plot
-# animated_fig = animate_trajectories(data)
-# animated_fig.show()
-
-# static_fig.write_html(path+"static_trajectories.html")
-# animated_fig.write_html(path+"animated_trajectories.html")
+    for job in jobs:
+        scenarios = os.listdir(path+job+"/output/")
+        for scenario in scenarios:
+            print(path+job+"/output/"+scenario)
+            analyze_scenario(path+job+"/output/"+scenario)
+            
 
 
+def analyze_scenario(path):
 
-# fig, pos_plot = plt.subplots()
-# plothusly(
-#     pos_plot, 
-#     obj_data["time"], 
-#     obj_data["x_pos"], 
-#     xtitle="Time [sec]",
-#     ytitle="Position [m]",
-#     title="Object Null Simulated Position",
-#     linestyle='-',
-#     datalabel="X Position")
-# plothus(pos_plot, obj_data["time"], obj_data["y_pos"], datalabel="Y Position")
-# plothus(pos_plot, obj_data["time"], obj_data["z_pos"], datalabel="Z Position")
+    data = combine_csv_files(path)
+    # print(data[0].data.head())
+    # data = [pd.read_csv("data/runs/test_constellation/"+file) for file in os.listdir("data/runs/test_constellation/")]
+    # print(data[0].data.head())
+    # df = data[1]
 
-meters = mpl.ticker.EngFormatter("m")
-newtons = mpl.ticker.EngFormatter("N")
-seconds = mpl.ticker.EngFormatter("s")
-radians = mpl.ticker.EngFormatter("rad")
+    # Generate static plot
+    static_fig = plot_trajectories(data)
+    # static_fig.show()
 
-df = data[0].data
-# Position plot
-fig, zplot = plt.subplots()
-plothusly(zplot, df["Time"], df["Z Position"], 
-          xtitle="Time [sec]",
-          ytitle="Position [m]]", 
-          datalabel="Z Position", 
-          title="Sim Obj Position")
-plothus(zplot, df["Time"], df["Y Position"], datalabel="Y Position")
-plothus(zplot, df["Time"], df["X Position"], datalabel="X Position")
+    # Generate animated plot
+    # animated_fig = animate_trajectories(data)
+    # animated_fig.show()
 
-zplot.xaxis.set_major_formatter(seconds)
-zplot.yaxis.set_major_formatter(meters)
-
-fig.savefig(f"data/runs/test_drone/object_{object_name}_pos.png")
-
-# #%%###########################
-# # Attitude plots
-# fig, angleplot = plt.subplots()
-# plothusly(angleplot, df["Time"], df["Pitch"], 
-#           xtitle="Time [sec]",
-#           ytitle="Angle from neutral position [rad]",
-#           datalabel="Pitch", 
-#           title="Sim Obj Attitude")
-# plothus(angleplot, df["Time"], df["Yaw"], datalabel="Yaw")
-# plothus(angleplot, df["Time"], df["Roll"], datalabel="Roll")
-# angleplot.xaxis.set_major_formatter(seconds)
-# angleplot.yaxis.set_major_formatter(radians)
+    # static_fig.write_html(path+"static_trajectories.html")
+    # animated_fig.write_html(path+"animated_trajectories.html")
 
 
-# fig.savefig(f"data/runs/object_{object_name}_att.png")
 
-# #%%###########################
+    # fig, pos_plot = plt.subplots()
+    # plothusly(
+    #     pos_plot, 
+    #     obj_data["time"], 
+    #     obj_data["x_pos"], 
+    #     xtitle="Time [sec]",
+    #     ytitle="Position [m]",
+    #     title="Object Null Simulated Position",
+    #     linestyle='-',
+    #     datalabel="X Position")
+    # plothus(pos_plot, obj_data["time"], obj_data["y_pos"], datalabel="Y Position")
+    # plothus(pos_plot, obj_data["time"], obj_data["z_pos"], datalabel="Z Position")
 
-# fig, threedplot = plt.subplots()
-# fig.add_subplot(projection='3d')
+    meters = mpl.ticker.EngFormatter("m")
+    newtons = mpl.ticker.EngFormatter("N")
+    seconds = mpl.ticker.EngFormatter("s")
+    radians = mpl.ticker.EngFormatter("rad")
 
-# # Prepare arrays x, y, z
-# theta = np.linspace(-4 * np.pi, 4 * np.pi, 100)
-# z = np.linspace(-2, 2, 100)
-# r = z**2 + 1
-# x = r * np.sin(theta)
-# y = r * np.cos(theta)
+    print(data)
 
-# threedplot.plot(x, y, z, label='parametric curve')
-# threedplot.legend()
+    df = data[0].data
+    # Position plot
+    fig, zplot = plt.subplots()
+    plothusly(zplot, df["Time"], df["Z Position"], 
+            xtitle="Time [sec]",
+            ytitle="Position [m]]", 
+            datalabel="Z Position", 
+            title="Sim Obj Position")
+    plothus(zplot, df["Time"], df["Y Position"], datalabel="Y Position")
+    plothus(zplot, df["Time"], df["X Position"], datalabel="X Position")
 
-# fig.savefig(f"data/runs/object_{object_name}_3d_plot.png")
+    zplot.xaxis.set_major_formatter(seconds)
+    zplot.yaxis.set_major_formatter(meters)
+
+    fig.savefig(path+f"/object_{object_name}_pos.png")
+
+    #%%###########################
+    # Attitude plots
+    fig, angleplot = plt.subplots()
+    plothusly(angleplot, df["Time"], df["Pitch"], 
+              xtitle="Time [sec]",
+              ytitle="Angle from neutral position [rad]",
+              datalabel="Pitch", 
+              title="Sim Obj Attitude")
+    plothus(angleplot, df["Time"], df["Yaw"], datalabel="Yaw")
+    plothus(angleplot, df["Time"], df["Roll"], datalabel="Roll")
+    angleplot.xaxis.set_major_formatter(seconds)
+    angleplot.yaxis.set_major_formatter(radians)
+
+    fig.savefig(path+f"/object_{object_name}_att.png")
+
+
+    # fig.savefig(f"data/runs/object_{object_name}_att.png")
+
+    # #%%###########################
+
+    # fig, threedplot = plt.subplots()
+    # fig.add_subplot(projection='3d')
+
+    # # Prepare arrays x, y, z
+    # theta = np.linspace(-4 * np.pi, 4 * np.pi, 100)
+    # z = np.linspace(-2, 2, 100)
+    # r = z**2 + 1
+    # x = r * np.sin(theta)
+    # y = r * np.cos(theta)
+
+    # threedplot.plot(x, y, z, label='parametric curve')
+    # threedplot.legend()
+
+    # fig.savefig(f"data/runs/object_{object_name}_3d_plot.png")
+
+
+# analyze_scenario("data/todo/default_name/output/attitude_test_1")
+analyze_scenarios()

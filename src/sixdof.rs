@@ -6,13 +6,16 @@ use std::time::{Duration, Instant};
 use std::{default, u64};
 use std::{sync::atomic::{AtomicU64, Ordering}};
 use std::{fmt::format, mem::zeroed, vec};
+use std::fs;
+use std::path::Path;
+// use std::io::Result;
 use indicatif::ProgressBar;
 use na::{Dyn, SMatrix};
 use nalgebra as na;
 use serde::de::value;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
-use crate::datatypes::{State, Inputs, GRAPHICAL_SCALING_FACTOR};
+use crate::datatypes::{rotation_frame, Inputs, State, GRAPHICAL_SCALING_FACTOR};
 use crate::{environments, fc::*};
 use std::net::TcpStream;
 use std::io::{Read, Write};
@@ -23,6 +26,25 @@ use crate::fc;
 
 /// Data transmission constant for chunk size, set at 4kB
 const CHUNK_SIZE: usize = 4096;
+
+#[derive(Clone)]
+struct ScenarioInfo {
+    job_name: String,
+    scenario_name: String,
+}
+
+impl ScenarioInfo {
+    fn new(job_name: String, scenario_name: String) -> Self {
+        ScenarioInfo {
+            job_name: job_name,
+            scenario_name: scenario_name
+        }
+    }
+
+    fn get_job_name(&mut self) -> &str {
+        self.job_name.as_str()
+    }
+}
 
 /// Top level sim struct, which contains objects to be simulated and their environments.
 /// 
@@ -138,6 +160,7 @@ impl Sim {
     }
 
     pub fn run(&mut self) {
+        let t_start = std::time::Instant::now();
         let _ = self.run_until(self.end_time);
         // Send final update packet
         if self.is_gui{
@@ -145,7 +168,7 @@ impl Sim {
             debug!("Final Packet: {}", packet);
             self.datacom_send_packet("10.0.0.107:8081", &packet).unwrap();
         }
-        
+        info!("Program finished in {:.2?} in {:} steps", t_start.elapsed(), self.steps);
     }
 
     /// Adds an object to the simulation.
@@ -173,13 +196,45 @@ impl Sim {
         }
     }
 
+    /// Loads and runs all scenarios for a given job
+    pub fn load_and_run_job(folderpath: &str) -> Result<(), Error> {
+
+        // Obtain job from the todo folder by fetching directories, and taking the first one in 
+        // alphabetical order, then retrieve vector of scenarios
+        let job = (get_directories("data/todo").unwrap())[0].to_string();
+        debug!("JOB: {}", &job);
+        let scenario_file_path = job.clone() + "/scenarios";
+        let scenarios = get_files(&scenario_file_path).expect("No scenarios in file");
+
+        let mut scenario_vector = vec![];
+        for scenario in scenarios {
+            let scenario_loaded = ScenarioInfo::new(job.clone(), scenario);
+            debug!("JOB NAME: {}", scenario_loaded.job_name);
+            debug!("SCENARIO NAME: {}", scenario_loaded.scenario_name);
+            scenario_vector.push(scenario_loaded);
+        }
+
+        for scenario in scenario_vector {
+            let mut sim = Sim::load_scenario(scenario);
+            // sim.datacom_start("localhost:8080").expect("No connection established.");
+            sim.run();
+            sim.record_run("data/todo/default_name/output");
+        }
+
+        
+
+        
+
+        Ok(())
+    }
+
     /// Loads scenario from file. 
-    pub fn load_scenario(folderpath: &str) -> Self {
-        let mut filepath = folderpath.to_string();
-        filepath.push_str("/scenario_setup.json");
+    pub fn load_scenario(scenario: ScenarioInfo) -> Self {
+        let mut filepath = &scenario.scenario_name;
+        // filepath.push_str("/scenario_setup.json");
         info!("Loading {}...", filepath);
         let json_unparsed = std::fs::read_to_string(filepath).unwrap();
-        let json_parsed: Value = serde_json::from_str(&json_unparsed).unwrap();
+        let mut json_parsed: Value = serde_json::from_str(&json_unparsed).unwrap();
         
         // Assign basic values
         let name = json_parsed["scenarioName"].as_str().unwrap();
@@ -200,32 +255,45 @@ impl Sim {
         // Iterate over every vehicle with the worst pattern match ever made.
         // I can't figure out how to make this generic because I can't pass
         // `U` as a constant when read from a file.
-        match &json_parsed["vehicles"] {
+
+        match &mut json_parsed["vehicles"] {
             Value::Array(data_vector) => {
-                for obj in data_vector {
+                for mut obj in data_vector {
                     // debug!("{}", obj["input_size"]);
-                    let U = obj["input_size"].as_f64().unwrap() as usize;
+                    let U = obj["inputSize"].as_f64().unwrap() as usize;
+                    let mut run_name = scenario.scenario_name.clone();
+                    if let Some(stripped) = run_name.strip_suffix(".json") {
+                        run_name = stripped.to_string();
+                    }
+                    debug!("Run name: {}", run_name);
+                    obj["runName"] = Value::String(run_name);
+
+
+                    let mut job_name = scenario.job_name.clone();
+                    debug!("job name: {}", job_name);
+                    obj["jobName"] = Value::String(job_name);
+
                     let vehicle: Box<dyn Simulatable> = match U {
-                        1 => Box::new(Vehicle::<1>::load_from_json_parsed(&obj)),
-                        2 => Box::new(Vehicle::<2>::load_from_json_parsed(&obj)),
-                        3 => Box::new(Vehicle::<3>::load_from_json_parsed(&obj)),
-                        4 => Box::new(Vehicle::<4>::load_from_json_parsed(&obj)),
-                        5 => Box::new(Vehicle::<5>::load_from_json_parsed(&obj)),
-                        6 => Box::new(Vehicle::<6>::load_from_json_parsed(&obj)),
-                        7 => Box::new(Vehicle::<7>::load_from_json_parsed(&obj)),
-                        8 => Box::new(Vehicle::<8>::load_from_json_parsed(&obj)),
-                        9 => Box::new(Vehicle::<9>::load_from_json_parsed(&obj)),
-                        10 => Box::new(Vehicle::<10>::load_from_json_parsed(&obj)),
-                        11 => Box::new(Vehicle::<11>::load_from_json_parsed(&obj)),
-                        12 => Box::new(Vehicle::<12>::load_from_json_parsed(&obj)),
-                        13 => Box::new(Vehicle::<13>::load_from_json_parsed(&obj)),
-                        14 => Box::new(Vehicle::<14>::load_from_json_parsed(&obj)),
-                        15 => Box::new(Vehicle::<15>::load_from_json_parsed(&obj)),
-                        16 => Box::new(Vehicle::<16>::load_from_json_parsed(&obj)),
-                        17 => Box::new(Vehicle::<17>::load_from_json_parsed(&obj)),
-                        18 => Box::new(Vehicle::<18>::load_from_json_parsed(&obj)),
-                        19 => Box::new(Vehicle::<19>::load_from_json_parsed(&obj)),
-                        20 => Box::new(Vehicle::<20>::load_from_json_parsed(&obj)),
+                        1 => Box::new(Vehicle::<1>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        2 => Box::new(Vehicle::<2>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        3 => Box::new(Vehicle::<3>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        4 => Box::new(Vehicle::<4>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        5 => Box::new(Vehicle::<5>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        6 => Box::new(Vehicle::<6>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        7 => Box::new(Vehicle::<7>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        8 => Box::new(Vehicle::<8>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        9 => Box::new(Vehicle::<9>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        10 => Box::new(Vehicle::<10>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        11 => Box::new(Vehicle::<11>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        12 => Box::new(Vehicle::<12>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        13 => Box::new(Vehicle::<13>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        14 => Box::new(Vehicle::<14>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        15 => Box::new(Vehicle::<15>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        16 => Box::new(Vehicle::<16>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        17 => Box::new(Vehicle::<17>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        18 => Box::new(Vehicle::<18>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        19 => Box::new(Vehicle::<19>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
+                        20 => Box::new(Vehicle::<20>::load_from_job(&(scenario.job_name.clone()), &mut obj).unwrap()),
                         _ => panic!("Unsupported number of inputs when creating vehicle: {}", U)
                     };
                     Sim.add_object(vehicle);
@@ -245,7 +313,7 @@ impl Sim {
                             Sim.add_environment(Box::new(environments::GravitationalField::load_from_json_parsed(environment)))
                             },
                         "ConstantField" => {
-                            debug!("LOADED POINT MASS");
+                            // debug!("Constant Field");
                             Sim.add_environment(Box::new(environments::GravitationalField::load_from_json_parsed(environment)))
                         },
                         _ => {},
@@ -261,6 +329,8 @@ impl Sim {
 
         return Sim;
     }
+
+    
 
     /// Adds data transmission port to DATACOM.
     pub fn add_datacom_port(&mut self, new_port: String) {
@@ -531,8 +601,24 @@ impl<const U: usize> Vehicle<U> {
 
     pub fn get_u(&self, current_state: State) -> na::SMatrix<f64, U, 1> {
 
-        return self.fc.calculate_u(current_state)
+        let mut u = Inputs::<U>::zeros();
+        for (i, motor) in self.motors.iter().enumerate() {
+            u[i] = motor.get_force();
+        }
+
+        return u
     }
+
+    pub fn calculate_and_update_u(&mut self, t: f64, current_state: State) {
+        let u_cmd = self.fc.calculate_u(current_state);
+        let mut i=0;
+        for motor in &mut self.motors {
+            motor.set_force(u_cmd[i]);
+            motor.update_to_time(vec![0.0], t);
+            i += 1;
+        }
+    }
+
 
     pub fn get_A(&self) -> &na::SMatrix<f64, 12, 12>{
         &self.A
@@ -558,14 +644,33 @@ impl<const U: usize> Vehicle<U> {
         self.C = C_new;
     }
 
+    /// Loads vehicle using dual path data storage for type and instance in sim
+    pub fn load_from_job(job_name: &str, instance_info: &mut sj::Value) -> Result<Vehicle<U>, std::io::Error> {
+        let filepath = format!("{}/objects/{}/{}.json", job_name, instance_info["name"].as_str().unwrap(), instance_info["name"].as_str().unwrap());
+        debug!("Object Loaded Filepath: {}", filepath);
+        let json_unparsed = std::fs::read_to_string(filepath).unwrap();
+        let mut json_parsed: Value = serde_json::from_str(&json_unparsed).unwrap();
+        
+        json_parsed["state"] = instance_info["state"].take();
+        json_parsed["name"] = instance_info["name"].take();
+        json_parsed["physicsType"] = instance_info["physicsType"].take();
+        json_parsed["runName"] = instance_info["runName"].take();
+        json_parsed["jobName"] = instance_info["jobName"].take();
+
+        Ok(Vehicle::load_from_json_parsed(&json_parsed))
+    }
+
+    /// Load vehicle from a JSON file
     pub fn load_from_json(filepath: &str) -> Vehicle<U> {
         todo!();
     }
 
+    /// Loads vehicle from a JSON in string format
     pub fn load_from_json_string(json_unparsed: &str) -> Vehicle<U> {
         todo!();
     }
 
+    /// Loads vehicle from a full JSON object
     pub fn load_from_json_parsed(json_parsed: &sj::Value) -> Vehicle<U> {
         let name = json_parsed["name"].as_str().unwrap();
         let mass = json_parsed["mass"].as_f64().unwrap();
@@ -587,6 +692,8 @@ impl<const U: usize> Vehicle<U> {
             .map(|x| x.as_f64().unwrap())
             .collect();
 
+        debug!("B SIZE: {}", B_dat.len());
+
         let B: na::SMatrix<f64, 12, U> = na::SMatrix::from_row_slice(&B_dat[..]);
 
         let x_dat: Vec<f64> = json_parsed["state"]
@@ -602,13 +709,16 @@ impl<const U: usize> Vehicle<U> {
             "RK4" => {
                 (PhysicsType::StateSpace, Integrator::RK4)
             },
+            "ForwardEuler" => {
+                (PhysicsType::StateSpace, Integrator::ForwardEuler)
+            }
             _ => {
                 (PhysicsType::Static, Integrator::RK4)
             },
         };
 
         debug!("Name: {}", name);
-        // debug!("ID: {}", id);
+        debug!("ID: {}", id);
         // debug!("ID: {}", id);
         // debug!("ID: {}", id);
         debug!("Mass: {}", mass);
@@ -627,12 +737,30 @@ impl<const U: usize> Vehicle<U> {
             _ => {0}
         };
 
-        let run_name: &str = match &json_parsed["RunName"] {
+        let mut run_name: &str = match &json_parsed["runName"] {
             Value::String(run_name) => run_name,
-            _=> "",
+            _=> {
+                warn!("No run name found!");
+                ""
+            },
         };
 
-        let storage_directory = format!("data/runs/{}/object_{}_{}", run_name, id, name);
+        let mut job_name: &str = match &json_parsed["jobName"] {
+            Value::String(run_name) => run_name,
+            _=> {warn!("No job name found!");
+                ""},
+        };
+
+        let prefix = job_name.to_string() + "/scenarios/";
+        if let Some(stripped) = run_name.strip_prefix(&prefix) {
+            run_name = stripped;
+        }
+
+        debug!("Stripped run name: {}", run_name);
+        // let scenario = run_name.strip_prefix(job_name);
+        let storage_directory = format!("{}/output/{}", job_name, run_name);
+        fs::create_dir_all(storage_directory).expect("Could not create output directory.");
+        let storage_directory = format!("{}/output/{}/object_{}_{}", job_name, run_name, id, name);
         debug!("Storage Directory: {}", storage_directory);
 
         let mut data_recorder = DataLogger::<12,U>::new(sample_time, max_steps as usize, &storage_directory);
@@ -646,7 +774,7 @@ impl<const U: usize> Vehicle<U> {
                     debug!("Component Type: {}", component_type);
                     match component_type {
                         "IdealThruster" => {
-                            components.push(Box::new(IdealThruster::new()));
+                            components.push(Box::new(IdealThruster::load_from_json_parsed(obj.clone())));
                         },
                         _ => {}
                     }
@@ -664,6 +792,9 @@ impl<const U: usize> Vehicle<U> {
                 Box::new(FlightComputer::new_from_json(&json_parsed["flight_controller"]))
             }
         };
+
+
+        // debug!("A: {}", A);
 
         let mut vehicle = Vehicle::<U> {
             name: name.to_string(),
@@ -756,8 +887,12 @@ impl<const U: usize> Simulatable for Vehicle<U> {
 
     fn integrate_to_t(&mut self, t: f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) {
         let dt = t - self.last_time;
+        self.calculate_and_update_u(t, self.x);
         self.x = self.integrator.integrate(
             |x, t| self.get_xdot(&x, &t, &environment_vector), &self.x, &self.last_time, &t);
+
+        // debug!("Input Vector at t={}: {}", t, self.get_u(self.x));
+        // debug!("State Vector at t={}: {}", t, self.x);
         
         match self.physics_type {
             PhysicsType::Static => {
@@ -773,11 +908,16 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         self.last_time = t;        
     }
 
+    /// Calculates x_dot using the state space equation: \dot{x} = A\vec{x} + B\vec{u}
     fn get_xdot(&self, x: &State, t: &f64, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State {
         let x_dot_env = self.calculate_environmental_acceleration(environment_vector); 
+        // debug!("B: {}", self.B);
+        // debug!("u: {}", self.get_u(*x));
+        // debug!("x: {}", self.x);
         // debug!("B*u: {}", self.B*self.get_u(*x));
+        // debug!("xdot_env: {}", x_dot_env);
         self.A*x
-            + self.B*self.get_u(*x)
+            + rotation_frame(&x[6], &x[7], &x[8])*self.B*self.get_u(*x)
             + x_dot_env
     }
 
@@ -821,7 +961,7 @@ impl<const U: usize> Simulatable for Vehicle<U> {
             component.update_to_time(vec![], t);
             component_force_vec = component_force_vec + component.get_force_on_parent();
         };
-
+        debug!("Component Force Vector at t={}: {}", t, component_force_vec);
         return component_force_vec;
     }
 
@@ -1144,9 +1284,10 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
     pub fn to_csv(&mut self, filepath: &str) {
         // Setup
         let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
+        // debug!("to_csv filepath: {}", filepath);
         let mut csv: String = "Time,X Position,Y Position,Z Position,x_vel,y_vel,z_vel,Pitch,Roll,Yaw,pitch_vel,roll_vel,yaw_vel".to_string();
         if U > 1 {
-            for i in (&self.input_vector[0]) {
+            for (i, item) in ((&self.input_vector[0]).iter().enumerate()) {
                 csv.push_str(&format!(",U_{}", i));
             }
         }
@@ -1171,7 +1312,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
         }
 
         // Write to file
-        debug!("{}", filepath);
+        // debug!("{}", filepath);
         std::fs::write(filepath, csv).unwrap();
 
         // Clear data vectors, increase the number of refreshes. 
@@ -1218,3 +1359,29 @@ pub struct NetworkInfo {
     last_valid_port: Option<u16>
 }
 
+/// Fetches directories
+fn get_directories<P: AsRef<Path>>(path: P) -> Result<Vec<String>, std::io::Error>{
+    let entries = fs::read_dir(path)?;
+    
+    Ok(entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            
+            if path.is_dir() {
+                path.to_str().map(String::from)
+            } else {
+                None
+            }
+        })
+        .collect())
+}
+
+/// Fetches files
+fn get_files(path: &str) -> Result<Vec<String>, std::io::Error> {
+    Ok(fs::read_dir(path)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.path().to_str().map(String::from))
+        .collect())
+}

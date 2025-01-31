@@ -1,9 +1,10 @@
-use crate::{datatypes::*, sixdof};
+use crate::{datatypes::{*}, sixdof};
 use nalgebra as na;
 use na::{Dyn, SMatrix};
 use serde_json::{json, Value};
 use crate::sixdof::Integrator;
 use crate::graphical;
+use core::time;
 use std::f64::consts::PI;
 // use serde_json::{json, Value};
 
@@ -13,6 +14,7 @@ pub trait ComponentPart {
     fn get_force_on_parent(&self) -> SMatrix<f64, 12, 1>;
     fn set_force(&mut self, new_force:f64);
     fn datacom_get_model_json(&self) -> Value;
+    fn get_force(&self) -> f64;
 }
 
 pub struct ElectricalMotor {
@@ -143,6 +145,10 @@ impl ComponentPart for ElectricalMotor {
     fn update_to_time(&mut self, y: Vec<f64>, t: f64) {
         todo!();
     }
+
+    fn get_force(&self) -> f64 {
+        todo!();
+    }
 }
 
 pub struct RocketMotor {
@@ -182,6 +188,7 @@ pub struct IdealThruster {
     orientation: na::UnitVector3<f64>,
     integrator: Integrator,
     model: graphical::GraphicalData,
+    maximum_force_magnitude: f64,
 }
 
 impl IdealThruster {
@@ -235,6 +242,7 @@ impl IdealThruster {
         let orientation = na::Vector3::new(orientation_vec[0], orientation_vec[1], orientation_vec[2]);
         let orientation = na::UnitVector3::new_normalize(orientation);
 
+        debug!("Time Constant: {}", time_const);
         IdealThruster {
             time_const: time_const,
             force: 0.0,
@@ -280,11 +288,15 @@ impl ComponentPart for IdealThruster {
     }
 
     fn set_force(&mut self, new_force: f64) {
-        self.set_force = new_force;
+        self.set_force = limit_value(new_force, self.maximum_force_magnitude, -self.maximum_force_magnitude);
     }
 
     fn datacom_get_model_json(&self) -> Value {
         self.model.get_model_value()
+    }
+
+    fn get_force(&self) -> f64 {
+        self.get_force()
     }
 }
 
@@ -298,7 +310,8 @@ impl Default for IdealThruster {
             position: na::SMatrix::zeros(),
             orientation: na::UnitVector3::new_unchecked(na::Vector3::new(0.0, 0.0, 1.0)),
             integrator: Integrator::RK4,
-            model: graphical::GraphicalData{..Default::default()}
+            model: graphical::GraphicalData{..Default::default()},
+            maximum_force_magnitude: 3.8E3*1.0,
         }
     }
 }

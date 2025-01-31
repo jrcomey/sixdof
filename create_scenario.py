@@ -2,7 +2,55 @@ import json
 import numpy as np
 import pretty_errors
 import os
+from dataclasses import dataclass
+import torch
+import torch.nn as nn
+import random
+import math
 
+class Job:
+
+    def __init__(self, job_name="default_name", *, scenarios=[]):
+        self.job_name = job_name
+        self.scenarios = scenarios
+        self.objects = []
+
+    def add_object(self, new_object):
+        duplicate_check = False
+
+        for obj in self.objects:
+            if obj.name ==new_object.name and new_object.name != "":
+                duplicate_check = True
+
+        if duplicate_check == False:
+            self.objects.append(new_object)
+
+    def add_scenario(self, new_scenario): 
+
+        duplicate_check = False
+
+        for obj in self.scenarios:
+            if obj.scenario_name == new_scenario.scenario_name:
+                duplicate_check = True
+
+        if duplicate_check == False:
+            new_scenario.job_name = self.job_name
+            self.scenarios.append(new_scenario)
+
+    def export_job(self):
+        path = f"data/todo/{self.job_name}"
+        os.makedirs(path, exist_ok=True)
+        os.makedirs(path+"/scenarios", exist_ok=True)
+        os.makedirs(path+"/output", exist_ok=True)
+        os.makedirs(path+"/objects", exist_ok=True)
+
+        # print(self.scenarios)
+
+        for scenario in self.scenarios:
+            scenario.create_run_json(target_directory=path+f"/scenarios")
+
+        for obj in self.objects:
+            obj.save_sim_obj(path+f"/objects/{obj.name}")
 
 
 class Scenario:
@@ -22,7 +70,7 @@ class Scenario:
     def add_environment(self, environment):
         pass
 
-    def create_run_json(self):
+    def create_run_json(self, *, target_directory="data/todo"):
         scenario_json = {
             "scenarioName": self.scenario_name,
             "endTime": self.end_time,
@@ -30,16 +78,18 @@ class Scenario:
             "vehicles": [obj.create_json_dict() for obj in self.objects],
             "environments": [env.create_json_dict() for env in self.environments],
             "datacomPort": self.datacom_port,
+            "jobName": self.job_name.strip("/"),
         }
         # print(scenario_json)
 
-        # Make directories for sims if they don't already exist
-        if not os.path.isdir(input:=f"data/todo"):
-            os.mkdir(input)
-        if not os.path.isdir(output:=f"data/runs/{self.scenario_name}"):
-            os.mkdir(output)
+        # Commenting out legacy code
+        # # Make directories for sims if they don't already exist
+        # if not os.path.isdir(input:=f"data/todo"):
+        #     os.mkdir(input)
+        # if not os.path.isdir(output:=f"data/runs/{self.scenario_name}"):
+        #     os.mkdir(output)
 
-        with open(input+f"/scenario_setup.json", "w") as file:
+        with open(target_directory+f"/{self.scenario_name}.json", "w") as file:
             file.write(json.dumps(scenario_json))
 
 
@@ -58,6 +108,7 @@ class Component:
     def to_json_str(self):
         return json.dumps(self.create_json_dict())
 
+
 class IdealThruster(Component):
 
     def __init__(self,*, time_constant=0.01, position=np.array([[0.0, 0.0, 0.0]]), orientation=np.array([[0.0,0.0,0.0]])):
@@ -73,7 +124,8 @@ class IdealThruster(Component):
             "orientation": sum(self.orientation.tolist(),[])
         }
         return data
-    
+
+
 class FlightComputer:
 
     def __init__(self, sample_time, sensors, K):
@@ -90,11 +142,9 @@ class FlightComputer:
     
     def to_json_str(self):
         return json.dumps(self.create_json_dict())
+
         
-
-
-
-class Vehicle:
+class SimObject:
 
     def __init__(self, name="", mass=0.0, I = np.array([[0.0, 0.0, 0.0],[0,0,0],[0,0,0]]), *,
                  graphical_elements=[], physics_type="Static", init_state=np.zeros((12,1)),
@@ -156,17 +206,15 @@ class Vehicle:
         self.max_steps = max_recorder_buffer_steps
         self.run_name = run_name
         
-
-
     def create_json_dict(self):
         data= {
-            "name": self.name,
+            # "name": self.name,
             "mass": self.mass,
             "rot_inertia": sum(self.I.tolist(), []),
-            "state": sum(self.state.tolist(),[]),
+            # "state": sum(self.state.tolist(),[]),
             "A": sum(self.A.tolist(), []),
             "B": sum(self.B.tolist(), []),
-            "physicsType": self.physics_type,
+            # "physicsType": self.physics_type,
             "components": [comp.create_json_dict() for comp in self.components],
             "input_size": self.U,
             "GraphicalElements": [graph.create_json_dict() for graph in self.graphical_elements],
@@ -182,8 +230,31 @@ class Vehicle:
 
     def to_json_str(self):
         return json.dumps(self.create_json_dict())
-
     
+    def save_sim_obj(self, directory):
+        os.makedirs(directory, exist_ok=True)
+        with open(directory+f"/{self.name}.json", "w") as file:
+            file.write(self.to_json_str())
+
+
+@dataclass
+class Object_Instance:
+    object_name: str
+    initial_state: np.array
+    physics_type: str
+    input_size: int
+    
+    def create_json_dict(self):
+        data = {
+            "name": self.object_name,
+            "state": sum(self.initial_state.tolist(), []),
+            "physicsType": self.physics_type,
+            "inputSize": self.input_size,
+        }
+        return data
+
+    def to_json_str(self):
+        return json.dumps(self.create_json_dict())
 
 
 class Environment:
@@ -200,7 +271,8 @@ class Environment:
 
     def to_json_str(self):
         return json.dumps(self.create_json_dict())
-    
+
+   
 class PointMassGravity(Environment):
 
     def __init__(self, mass=0, soi_radius=0, position = np.array([0,0,0])):
@@ -216,7 +288,8 @@ class PointMassGravity(Environment):
             "soi_radius": self.soi_radius,
             "position": self.position.tolist()
         }
-    
+
+
 class ConstantField(Environment):
 
     def __init__(self, acceleration=9.81, direction=np.array([[0.0, 0.0, -1.0]])):
@@ -229,6 +302,7 @@ class ConstantField(Environment):
             "acceleration": self.acceleration,
             "direction":  sum(self.direction.tolist(),[])
         }
+
 
 class GraphicalElement:
 
@@ -251,6 +325,7 @@ class GraphicalElement:
             "Color": self.color,
             "Scale": self.scale,
         }
+
 
 # Rewrite later
 def keplerian_to_cartesian(a, e, i, Ω, ω, ν, μ=398600.4418):
@@ -309,13 +384,12 @@ def keplerian_to_cartesian(a, e, i, Ω, ω, ν, μ=398600.4418):
     R = R_Ω @ R_i @ R_ω
     
     # Transform to ECI frame
-    r = R @ r_p
+    r = R @ r_p 
     v = R @ v_p
     
     return r, v
 
-# BASIC SCENARIO
-    
+# BASIC SCENARIO    
 def test_scenario():
     # Earth Environment
     environments = [
@@ -324,9 +398,9 @@ def test_scenario():
     r_iss, v_iss = keplerian_to_cartesian(a=414+6.378E3, e=0.0009143, i=np.deg2rad(51.6367), Ω=np.deg2rad(114.1365), ω=np.deg2rad(50.0139), ν=np.deg2rad(310.1651),μ=398600.4418)
     r_iss*=1E3
     v_iss*=1E3
-    print(r_iss)
-    print(np.sqrt(r_iss[0]**2+r_iss[1]**2+r_iss[2]**2))
-    print(400.0E3+6.378E6)
+    # print(r_iss)
+    # print(np.sqrt(r_iss[0]**2+r_iss[1]**2+r_iss[2]**2))
+    # print(400.0E3+6.378E6)
     init_state=np.array([
         [r_iss[0]],    
         [r_iss[1]],
@@ -341,7 +415,7 @@ def test_scenario():
         [0.0],
         [0.0],
         ])
-    mass_sim_ISS = Vehicle(
+    mass_sim_ISS = SimObject(
         name="ISS", 
         mass=1.0, 
         # graphical_path="data/test_object/default_cube.obj", 
@@ -352,7 +426,7 @@ def test_scenario():
         max_recorder_buffer_steps=int(99E10)
     )
 
-    earth_graphical = Vehicle(
+    earth_graphical = SimObject(
         name="earth",
         mass=0,
         # graphical_path = "data/test_object/default_sphere.obj",
@@ -362,7 +436,7 @@ def test_scenario():
 
 
     scene = Scenario(objects=[earth_graphical, mass_sim_ISS], environments=environments, min_dt=1E-3, end_time=2*60*90)
-    scene.create_run_json()
+    return scene
 
 def test_constellation_scenario():
 
@@ -378,7 +452,7 @@ def test_constellation_scenario():
     objects = []
     longitudes = np.linspace(0, 360, 10)
 
-    earth_graphical = Vehicle(
+    earth_graphical = SimObject(
         name="earth",
         mass=0,
         # graphical_path = "data/test_object/default_sphere.obj",
@@ -394,9 +468,9 @@ def test_constellation_scenario():
         r_iss, v_iss = keplerian_to_cartesian(a=414+6.378E3, e=0.0009143, i=np.deg2rad(51.6367), Ω=np.deg2rad(longitude), ω=np.deg2rad(50.0139), ν=np.deg2rad(310.1651),μ=398600.4418)
         r_iss*=1E3
         v_iss*=1E3
-        print(r_iss)
-        print(np.sqrt(r_iss[0]**2+r_iss[1]**2+r_iss[2]**2))
-        print(400.0E3+6.378E6)
+        # print(r_iss)
+        # print(np.sqrt(r_iss[0]**2+r_iss[1]**2+r_iss[2]**2))
+        # print(400.0E3+6.378E6)
         init_state=np.array([
             [r_iss[0]],    
             [r_iss[1]],
@@ -411,7 +485,7 @@ def test_constellation_scenario():
             [0.0],
             [0.0],
             ])
-        mass_sim_ISS = Vehicle(
+        mass_sim_ISS = SimObject(
             name=f"ISS_{i}", 
             mass=1.0, 
             # graphical_path="data/test_object/default_cube.obj", 
@@ -475,7 +549,7 @@ def test_quadcopter():
         # IdealThruster(time_constant=0.01)
     ]
 
-    drone = Vehicle(
+    drone = SimObject(
         name="TestDrone",
         mass=0.25,
         physics_type="RK4",
@@ -494,7 +568,7 @@ def test_quadcopter():
     
     objects.append(drone)
 
-    static_cube = Vehicle(
+    static_cube = SimObject(
         name="StaticCube",
         mass=0.25,
         physics_type="Static",
@@ -508,7 +582,7 @@ def test_quadcopter():
     
     objects.append(static_cube)
 
-    terrain = Vehicle(
+    terrain = SimObject(
         name="HighPolyTerrain",
         mass=0,
         physics_type="Static",
@@ -522,9 +596,214 @@ def test_quadcopter():
 
 
     scene = Scenario(scenario_name=run_name, objects=objects, environments=environments, min_dt=1E-3, end_time=10.0)
-    scene.create_run_json()
+    return scene
 
-if __name__ == "__main__":
+def blizzard_test_object_setup():
+
+    blizzard_graphical = GraphicalElement(
+        name="blizzard_body_model",
+        filepath="data/test_object/blizzard.obj",
+        relative_position=[0,0,0],
+        orientation=[0,0,0],
+        rotation=[0,0,0],
+        color=[1, 1, 1, 1],
+        scale=[1,1,1]
+    )
+
+    rotor_positions = [
+        [-0.72, -2.982, 1.041+0.15],    # FLT
+        [-0.72, 2.982, 1.041+0.15],     # FRT
+        [4.220, -2.982, 1.041+0.15],    # BLT
+        [4.220, 2.982, 1.041+0.15],     # BRT
+        [-0.72, -2.982, 1.041-0.15],    # FLB
+        [-0.72, 2.982, 1.041-0.15],     # FRB
+        [4.220, -2.982, 1.041-0.15],    # BLB
+        [4.220, 2.982, 1.041-0.15],     # BRB
+    ]
+
+    components = []
+    for position in rotor_positions:
+        components.append(
+            IdealThruster(time_constant=0.4,
+                          position=np.array([position])
+                          )
+        )
+    mass = 2200.0
+
+    mixer = np.array([[0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # X Forces
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Y Forces
+                  [1, 1, 1, 1, 1, 1, 1, 1],  # Z Forces
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty 
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty 
+                  [3, -3, 3, -3, 3, -3, 3, -3],  # X Moments (Roll)
+                  [2.5, 2.5, -2.5, -2.5, 2.5, 2.5, -2.5, -2.5],  # Y Moments (Pitch)
+                  [-1, 1, 1, -1, 1, -1, -1, 1]], dtype=float)  # Z Moments (Yaw)
+    
+    # Override Mixer
+    # mixer = np.array([
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [1.0, 1.0, 1.0, 1.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [3.0, -3.0, 3.0, -3.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0],
+    # ])
+    
+    I = np.array([[600, 0, 0],
+              [0, 800, 0],
+              [0, 0, 800]])
+    
+    B = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # x'
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # y'
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # z'
+                           [0, 0, 0, 1/mass, 0, 0, 0, 0, 0, 0, 0, 0],       # x''
+                           [0, 0, 0, 0, 1/mass, 0, 0, 0, 0, 0, 0, 0],       # y''
+                           [0, 0, 0, 0, 0, 1/mass, 0, 0, 0, 0, 0, 0],       # z''
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # phi'
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # theta'
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # psi'
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # phi''
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            # theta''
+                           [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],           # psi''
+                          dtype=float)
+    
+    B[9:12, 9:12] = np.linalg.inv(I)
+    B = B @ mixer
+    print(B)
+
+    K = np.loadtxt("data/todo/default_name/objects/blizzard/Klqr.csv", dtype=float, delimiter=',')
+
+    K[9,1] = -0.1*K[9,6]
+    K[9,4] = -0.3*K[9,9]
+
+    K[10,0] = 0.1*K[10,7]
+    K[10,3] = 0.3*K[10,10]
+
+    # K = np.array([
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # x'
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # y'
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # z'
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # x''
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # y''
+    #                     [0, 0, -1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # z''
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # phi'
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # theta'
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # psi'
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # phi''
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # theta''
+    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],          # psi''
+    #                       dtype=float)
+    
+    K = mixer.transpose() @ -K
+
+    print(K)
+
+
+    blizzard = SimObject(
+        name="blizzard",
+        mass=mass,
+        I = I,
+        graphical_elements=[blizzard_graphical],
+        physics_type="RK4",
+        init_state=np.zeros((12,1)),
+        dependent_components=components,
+        # A = np.array([
+        #             [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],   # x
+        #             [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],   # y
+        #             [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],   # z
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],   # x'
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],   # y'
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],   # z'
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],   # phi
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],   # theta
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],   # psi
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],   # phi'
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],   # theta'
+        #             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=float),  # psi',
+        B=B,
+        fc=FlightComputer(
+            sample_time=0.001,
+            sensors=[],
+            K=K,
+            # K = np.zeros((12,4))
+        ),
+        recording_sample_time=0.1,
+        max_recorder_buffer_steps=1000,
+        run_name="default_name"
+    )
+
+    return blizzard
+
+def blizzard_hover_scenario_setup(name=""): 
+    
+    environments = [
+        ConstantField(),
+        # PointMassGravity(mass=5.97219E24, position=np.array([0.0, 0.0, -6.378E6]))
+    ]
+
+    blizzard_instance = Object_Instance(
+        "blizzard",
+        np.zeros((12,1)),
+        "ForwardEuler",
+        8,
+    )
+
+    # object_list = [blizzard_instance for i in range(10)]
+    # print(object_list)
+    object_list = [blizzard_instance]
+
+    return Scenario(scenario_name="blizzard_hover_test", end_time=60.0, min_dt=0.0001, objects=object_list, environments=environments)
+
+def blizzard_attitude_stabilization_setup(name="attitude_test"): 
+    
+    environments = [
+        ConstantField(),
+        # PointMassGravity(mass=5.97219E24, position=np.array([0.0, 0.0, -6.378E6]))
+    ]
+
+    init_state = np.zeros((12,1))
+    init_state[3:6] = np.random.rand(3,1) * math.pi
+    
+
+    blizzard_instance = Object_Instance(
+        "blizzard",
+        init_state,
+        "RK4",
+        8,
+    )
+
+    # object_list = [blizzard_instance for i in range(10)]
+    # print(object_list)
+    object_list = [blizzard_instance]
+
+    return Scenario(scenario_name=name, end_time=60.0, min_dt=0.0001, objects=object_list, environments=environments)
+
+def basic_job():
+    job = Job()
+
+    job.add_object(blizzard_test_object_setup())
+    job.add_scenario(blizzard_hover_scenario_setup())
+    [job.add_scenario(blizzard_attitude_stabilization_setup(f"attitude_test_{i}")) for i in range(5)]
+
+    # job.add_scenario(test_scenario())
+    # job.add_scenario(test_quadcopter())
+    # job.add_scenario()
     # test_scenario()
     # test_quadcopter()
-    test_constellation_scenario()
+    # test_constellation_scenario()
+
+    job.export_job()
+
+
+if __name__ == "__main__":
+    basic_job()

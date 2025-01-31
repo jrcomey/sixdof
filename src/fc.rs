@@ -63,8 +63,11 @@ impl<const U: usize> FlightControl<U> for FlightComputer<U> {
 
     fn calculate_u(&self, current_state: State) -> Inputs<U> {
         // debug!("FC OUTPUT: {}", self.K*current_state);
-        let err: State = State::zeros() - current_state;
-        self.K*err
+        let err: State = rotation_frame(&current_state[6], &current_state[7], &current_state[8]).transpose()
+        * (State::zeros() - current_state);
+        // debug!("K: {}", self.K);
+        // debug!("FC OUTPUT: {}", -self.K*err);
+        -self.K*err
     }
 }
 
@@ -89,6 +92,14 @@ impl<const U: usize> FlightControl<U> for NullComputer<U> {
     fn calculate_u(&self, current_state: State) -> Inputs<U> {
         return Inputs::<U>::zeros();
     }
+}
+
+pub struct NNComputer<const U: usize> {
+    sample_time: f64,
+    t_last_updated: f64,
+    sensors: Vec<Sensor>,
+    cmd_inputs: Inputs<U>,
+    
 }
 
 // #####################
