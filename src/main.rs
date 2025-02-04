@@ -18,7 +18,7 @@
 
 */
 
-
+#![allow(warnings)]
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -50,13 +50,12 @@ mod fc;
 mod graphical;
 mod components;
 use crate::components::ComponentPart;
-// extern crate tract_onnx;
-use tract_onnx::prelude::*;
-use tract_ndarray::Array;
+extern crate tract_onnx;
 // use tract_onnx::prelude::*;
+// use tract_ndarray::Array;
 fn main() -> Result<(), std::io::Error> {
     let t_start = std::time::Instant::now();
-    std::env::set_var("RUST_LOG", "info");                                 // Initialize logger
+    std::env::set_var("RUST_LOG", "sixdof=warn,warn cargo run");                                 // Initialize logger
     pretty_env_logger::init();
     info!("Program Start!");
 

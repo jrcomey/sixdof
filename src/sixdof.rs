@@ -255,7 +255,6 @@ impl Sim {
         // Iterate over every vehicle with the worst pattern match ever made.
         // I can't figure out how to make this generic because I can't pass
         // `U` as a constant when read from a file.
-
         match &mut json_parsed["vehicles"] {
             Value::Array(data_vector) => {
                 for mut obj in data_vector {
@@ -783,15 +782,40 @@ impl<const U: usize> Vehicle<U> {
             _ => {}
         }
 
-        let fc: Box<dyn fc::FlightControl<U>> = match &json_parsed["flight_controller"] { 
-            Value::String(fc_type) => {
-                debug!("NO FLIGHT CONTROLLER FOUND");
+        let fc: Box<dyn fc::FlightControl<U>> = match &json_parsed["flight_controller"] {
+            
+            Value::Object(obj) => {
+                debug!("{}", obj["fcType"].as_str().unwrap());
+                match obj["fcType"].as_str().unwrap() {
+                    "StateFeedback" => {
+                        Box::new(FlightComputer::new_from_json(&json_parsed["flight_controller"]))
+                    },
+                    "NeuralNet" => {
+                        Box::new(NNComputer::new_from_json(&json_parsed["flight_controller"]).unwrap())
+                    }
+                    _ => {
+                        warn!("Invalid flight controller type specified!");
+                        Box::new(NullComputer::new())
+                    }
+                }
+            },
+            _ => {
+                warn!("NO FLIGHT CONTROLLER FOUND");
                 Box::new(NullComputer::new())
-            }
-            _=> {
-                Box::new(FlightComputer::new_from_json(&json_parsed["flight_controller"]))
-            }
+            },
         };
+
+        // let fc: Box<dyn fc::FlightControl<U>> = match &json_parsed["flight_controller"] { 
+        //     Value::String(fc_type) => {
+        //         warn!("NO FLIGHT CONTROLLER FOUND");
+        //         Box::new(NullComputer::new())
+        //     }
+        //     _=> {
+        //         Box::new(FlightComputer::new_from_json(&json_parsed["flight_controller"]))
+        //     }
+        // };
+
+        
 
 
         // debug!("A: {}", A);
@@ -873,6 +897,10 @@ impl<const U: usize> Vehicle<U> {
     pub fn set_id(&mut self, new_id: u64) {
         self.id = new_id;
     }
+
+    pub fn get_cmd_position(&self) -> State {
+        self.fc.get_cmd_position()
+    }
 }
 
 impl<const U: usize> Simulatable for Vehicle<U> {
@@ -897,11 +925,11 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         match self.physics_type {
             PhysicsType::Static => {
                 if self.last_time > 0.0 {
-                    self.data.record(t, self.get_state(), self.get_u(self.x));
+                    self.data.record(t, self.get_state(), self.get_cmd_position(), self.get_u(self.x));
                 }
             }
             _ => {
-                self.data.record(t, self.get_state(), self.get_u(self.x));
+                self.data.record(t, self.get_state(), self.get_cmd_position(), self.get_u(self.x));
             }
         }
 
@@ -1230,6 +1258,7 @@ fn forward_matrix(dt: f64) -> SMatrix<f64, 12, 12> {
 pub struct DataLogger<const S: usize, const U: usize> {
     time_vector: Vec<f64>,
     state_vector: Vec<na::SMatrix<f64, S, 1>>,
+    cmd_vector: Vec<State>,
     input_vector: Vec<Inputs<U>>,
     sample_time: f64, 
     last_time: f64,
@@ -1240,12 +1269,14 @@ pub struct DataLogger<const S: usize, const U: usize> {
 
 impl<const S: usize, const U:usize> DataLogger<S, U> {
 
+    /// Create new datalogger
     pub fn new(sample_time: f64, max_steps: usize, storage_directory: &str) -> Self {
 
         // debug!("Sample time: {}", sample_time);
         let mut d = DataLogger{
             time_vector: vec![],
             state_vector: vec![],
+            cmd_vector: vec![],
             input_vector: vec![],
             sample_time: sample_time,
             last_time: -100.0,
@@ -1259,7 +1290,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
     }
 
     /// Function to record data, with checks for sample time.
-    pub fn record(&mut self, time: f64, state: na::SMatrix<f64, S, 1>, input: Inputs<U>) {
+    pub fn record(&mut self, time: f64, state: na::SMatrix<f64, S, 1>, cmd_state: State, input: Inputs<U>) {
         
         // Log data if sample time indicates it is ready, or bypass if values are null. 
         if ((time - self.last_time) >= self.sample_time) 
@@ -1267,6 +1298,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
         || self.how_many_steps()<1 {
             self.time_vector.push(time);
             self.state_vector.push(state);
+            self.cmd_vector.push(cmd_state);
             self.input_vector.push(input);
             self.last_time = time;
             
@@ -1281,11 +1313,25 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
 
     }
 
+    /// Exports datalogger items to file
     pub fn to_csv(&mut self, filepath: &str) {
         // Setup
         let filepath = format!("{}_{}.csv", self.storage_directory, self.num_refresh);
         // debug!("to_csv filepath: {}", filepath);
         let mut csv: String = "Time,X Position,Y Position,Z Position,x_vel,y_vel,z_vel,Pitch,Roll,Yaw,pitch_vel,roll_vel,yaw_vel".to_string();
+        csv = csv 
+            + ",x_pos_cmd"
+            + ",y_pos_cmd"
+            + ",z_pos_cmd"
+            + ",x_vel_cmd"
+            + ",y_vel_cmd"
+            + ",z_vel_cmd"
+            + ",pitch_cmd"
+            + ",roll_cmd"
+            + ",yaw_cmd"
+            + ",pitch_vel_cmd"
+            + ",roll_vel_cmd"
+            + ",yaw_vel_cmd";
         if U > 1 {
             for (i, item) in ((&self.input_vector[0]).iter().enumerate()) {
                 csv.push_str(&format!(",U_{}", i));
@@ -1300,6 +1346,9 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             local_str = local_str + &format!("{:?}", self.time_vector[i]); // Time
             for state_el in (&self.state_vector[i]).into_iter() {
                 local_str.push_str(&format!(",{:?}", state_el));
+            }
+            for cmd_el in (&self.cmd_vector[i]).into_iter() {
+                local_str.push_str(&format!(",{:?}", cmd_el));
             }
             if U > 1 {
                 for input in (&self.input_vector[i]).into_iter() {
@@ -1333,6 +1382,7 @@ impl<const S: usize, const U: usize> Default for DataLogger<S, U> {
         DataLogger {
             time_vector: vec![],
             state_vector: vec![],
+            cmd_vector: vec![],
             input_vector: vec![],
             sample_time: 0.0,
             last_time: -100.0,

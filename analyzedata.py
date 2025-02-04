@@ -147,13 +147,16 @@ def combine_csv_files(dir):
             if match:
                 object_id = match.group(1)
                 file_path = os.path.join(input_directory, filename)
-                df = pd.read_csv(file_path)
+                df = pd.read_csv(file_path, index_col=False)
                 object_data[object_id].append(df)
                 to_delete.append(file_path)
     combined_list = []
     # Combine and save DataFrames for each object
     for object_id, dataframes in object_data.items():
+        # [print(df.head()) for df in dataframes]
         combined_df = pd.concat(dataframes, ignore_index=True)
+        # print(combined_df.head())
+        # print(combined_df["Y Position"])
         output_file = os.path.join(output_directory, f"{object_id}_combined.csv")
         combined_df.to_csv(output_file, index=False)
         combined_df = combined_df.sort_values("Time", ascending=True)
@@ -307,9 +310,11 @@ def analyze_scenario(path):
     seconds = mpl.ticker.EngFormatter("s")
     radians = mpl.ticker.EngFormatter("rad")
 
-    print(data)
+    # print(data)
 
     df = data[0].data
+
+    # print(df.head())
     # Position plot
     fig, zplot = plt.subplots()
     plothusly(zplot, df["Time"], df["Z Position"], 
@@ -361,5 +366,5 @@ def analyze_scenario(path):
     # fig.savefig(f"data/runs/object_{object_name}_3d_plot.png")
 
 
-# analyze_scenario("data/todo/default_name/output/attitude_test_1")
+# analyze_scenario("data/todo/default_name/output/blizzard_hover_test")
 analyze_scenarios()
