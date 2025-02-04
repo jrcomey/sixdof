@@ -573,7 +573,7 @@ def compute_trajectory_loss(sim_run: SimObjectOutput):
         )
     )
 
-    return 0 * pos_error + 1 * vel_error + 1 * rot_error + 5 * rot_vel_error
+    return 5 * pos_error + 1 * vel_error + 5 * rot_error + 1 * rot_vel_error
 
 # def train_step(model, optimizer, batch_of_runs):
 #     optimizer.zero_grad()
@@ -1089,9 +1089,11 @@ def train_model(job, model, optimizer, loss_function, num_epochs=100, noise_scal
     input_dim = 12  # State vector size
     onnx_path = job.path + "/objects/blizzard/blizzard.onnx"
 
+    best_loss = float("inf")
+    best_model_params = None
+
     for epoch in range(num_epochs):
-        best_loss = float("inf")
-        best_model_params = None
+        
 
         # Try multiple weight variations
         for _ in range(num_variations):
@@ -1197,7 +1199,7 @@ if __name__ == "__main__":
     model = job.objects[0].fc.K
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    train_model(job, model, optimizer, compute_trajectory_loss, num_epochs=500, noise_scale=0.1, num_variations=100)
-    # train_evolution_strategy(job, model, num_generations=50, population_size=10, mutation_scale=1.0)
+    # train_model(job, model, optimizer, compute_trajectory_loss, num_epochs=100, noise_scale=0.1, num_variations=5)
+    train_evolution_strategy(job, model, num_generations=50, population_size=10, mutation_scale=5.0)
     # basic_job()
 
