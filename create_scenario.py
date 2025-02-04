@@ -1197,7 +1197,7 @@ if __name__ == "__main__":
     model = job.objects[0].fc.K
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    train_model(job, model, optimizer, compute_trajectory_loss, num_epochs=100, noise_scale=0.1, num_variations=5)
+    train_model(job, model, optimizer, compute_trajectory_loss, num_epochs=500, noise_scale=0.1, num_variations=100)
     # train_evolution_strategy(job, model, num_generations=50, population_size=10, mutation_scale=1.0)
     # basic_job()
 
