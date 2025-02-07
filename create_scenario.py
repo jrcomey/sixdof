@@ -7,11 +7,24 @@ import torch
 import torch.nn as nn
 import random
 import math
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import onnx
-# torch.set_default_tensor_type(torch.DoubleTensor)
-torch.set_default_dtype(torch.double)
+from collections import deque
+# torch.set_default_dtype(torch.double)
 import pandas as pd
-from analyzedata import *
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from typing import Tuple, List
+from collections import namedtuple, deque
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+# from analyzedata import *
+
+# Constants
+# BATCH_SIZE = 32
+LR = 1E-3
+RUN_NUMS = 100
+
 class Job:
 
     def __init__(self, job_name="default_name", *, scenarios=[]):
@@ -144,21 +157,21 @@ class FlightComputer:
             self.fcType = "StateFeedback"
         elif isinstance(self.K, nn.Module):
             self.fcType = "NeuralNet"
+        else:
+            self.fcType = ""
 
     def set_NN_filepath(self, filepath):
         self.NN_filepath = filepath
 
-    def create_json_dict(self):
-        if self.fcType=="NeuralNet":
+    def update_NN(self, model):
+        self.K = None
+        self.K = model
 
+    def create_json_dict(self):
+        # print(self.fcType)
+        if self.fcType=="NeuralNet":
             dummy_input=torch.zeros(1,12).to(torch.float32)
             model = self.K.to(torch.float32)
-
-            # for param in model.parameters():
-            #     param.data = param.data.to(torch.float32)
-
-            # print("Model dtype:", next(model.parameters()).dtype)
-            # print("Input dtype:", dummy_input.dtype)
             exported_program: torch.export.ExportedProgram =  torch.onnx.export(
             model,
             dummy_input,
@@ -168,31 +181,17 @@ class FlightComputer:
             do_constant_folding=True,
             input_names=['input'],
             output_names=['output'],
-            # input_types=[torch.float32],
-            # output_types=[torch.float32],
-            # Explicitly specify float64
-            # custom_opsets={'': 17}
             )
-            # print(exported_program)
-
-            # onnx_model = onnx.load(self.NN_filepath)
-            # for tensor in onnx_model.graph.initializer:
-            #     print(f"Tensor {tensor.name} dtype: {onnx.helper.tensor_dtype_to_np_dtype(tensor.data_type)}")
-            # else:
-            #     pass
-
-        if self.fcType=="StateFeedback":
+            data= {
+                "fcType": self.fcType,
+                "sample_time": self.sample_time,
+            }
+        else:
             data = {
             "fcType": self.fcType,
             "sample_time": self.sample_time,
             "K": sum(self.K.tolist(), [])
         }
-        elif self.fcType=="NeuralNet":
-            data = {
-                "fcType": self.fcType,
-                "sample_time": self.sample_time,
-                "NN_filepath": self.NN_filepath
-            }
         return data
     
     def to_json_str(self):
@@ -262,7 +261,7 @@ class SimObject:
         self.run_name = run_name
         
     def create_json_dict(self):
-        data= {
+        data = {
             # "name": self.name,
             "mass": self.mass,
             "rot_inertia": sum(self.I.tolist(), []),
@@ -290,7 +289,6 @@ class SimObject:
         os.makedirs(directory, exist_ok=True)
         with open(directory+f"/{self.name}.json", "w") as file:
             file.write(self.to_json_str())
-
 
 @dataclass
 class Object_Instance:
@@ -381,12 +379,6 @@ class GraphicalElement:
             "Scale": self.scale,
         }
 
-# @dataclass
-# class SimJobOutput:
-
-# @dataclass
-# class SimScenarioOutput:
-
 @dataclass
 class SimObjectOutput:
     time:           np.ndarray      # Time vector
@@ -396,199 +388,313 @@ class SimObjectOutput:
     trans_vel_cmd:  np.ndarray      # Commanded translational velocity
     rot_true:       np.ndarray      # True rotational position
     rot_cmd:        np.ndarray      # True rotational command
-    rot_vel_true:   np.ndarray
-    rot_vel_cmd:    np.ndarray
-    # trans_est:      np.ndarray      # Estimated State
-    # inputs:         np.ndarray      # inputs
+    rot_vel_true:   np.ndarray      # True rotational velocity
+    rot_vel_cmd:    np.ndarray      # Rotational Velocity Command
+    states:         np.ndarray      # Full States
+    u_vector:       np.ndarray      # U
 
-    def read_from_csv(filepath):
-        df = pd.read_csv(filepath)
-        time = df["Time"].to_numpy()
-        state_true = df[[
-            "X Position",
-            "Y Position",
-            "Z Position",]
-            # "x_vel",
-            # "y_vel",
-            # "z_vel"]
-            # "Pitch",
-            # "Roll",
-            # "Yaw",
-            # "pitch_vel",
-            # "roll_vel",
-            # "yaw_vel"
-            ].to_numpy()
-        
-        trans_vel_true = df[[
-            "x_vel",
-            "y_vel",
-            "z_vel"
-        ]].to_numpy()
+    def to_vector(self):
+        states = self.states[:-1,:]
+        next_states = self.states[1:,:]
+        u = self.u_vector[:-1,:]
+        # print(u.shape)
+        return states, next_states, u
 
-        trans_vel_cmd = df[[
-            "x_vel_cmd",
-            "y_vel_cmd",
-            "z_vel_cmd",
-        ]].to_numpy()
-        
-        rot_true = df[[
-            "Pitch",
-            "Roll",
-            "Yaw",
-        ]].to_numpy()
 
-        rot_cmd = df[[
-            "pitch_cmd",
-            "roll_cmd",
-            "yaw_cmd",
+def read_from_csv(filepath):
+    df = pd.read_csv(filepath)
+    time = df["Time"].to_numpy()
+    full_state = df[[
+        "X Position",
+        "Y Position",
+        "Z Position",
+        "x_vel",
+        "y_vel",
+        "z_vel",
+        "Pitch",
+        "Roll",
+        "Yaw",
+        "pitch_vel",
+        "roll_vel",
+        "yaw_vel"
         ]].to_numpy()
+    state_true = df[[
+        "X Position",
+        "Y Position",
+        "Z Position",]
+        # "x_vel",
+        # "y_vel",
+        # "z_vel"]
+        # "Pitch",
+        # "Roll",
+        # "Yaw",
+        # "pitch_vel",
+        # "roll_vel",
+        # "yaw_vel"
+        ].to_numpy()
+    
+    trans_vel_true = df[[
+        "x_vel",
+        "y_vel",
+        "z_vel"
+    ]].to_numpy()
 
-        rot_vel_true = df[[
-            "pitch_vel",
-            "roll_vel",
-            "yaw_vel"
-        ]].to_numpy()
+    trans_vel_cmd = df[[
+        "x_vel_cmd",
+        "y_vel_cmd",
+        "z_vel_cmd",
+    ]].to_numpy()
+    
+    rot_true = df[[
+        "Pitch",
+        "Roll",
+        "Yaw",
+    ]].to_numpy()
 
-        rot_vel_cmd = df[[
-            "pitch_vel_cmd",
-            "roll_vel_cmd",
-            "yaw_vel_cmd"
-        ]].to_numpy()
-        
-        state_cmd = df[[
-            "x_pos_cmd",
-            "y_pos_cmd",
-            "z_pos_cmd",]
-            # "x_vel",
-            # "y_vel",
-            # "z_vel"]
-            # "pitch",
-            # "Roll",
-            # "Yaw",
-            # "pitch_vel",
-            # "roll_vel",
-            # "yaw_vel"
-            ].to_numpy()
-        
-        return SimObjectOutput(time, state_true, state_cmd,trans_vel_true=trans_vel_true, trans_vel_cmd=trans_vel_cmd, rot_true=rot_true, rot_cmd=rot_cmd, rot_vel_true=rot_vel_true, rot_vel_cmd=rot_vel_cmd)
+    rot_cmd = df[[
+        "pitch_cmd",
+        "roll_cmd",
+        "yaw_cmd",
+    ]].to_numpy()
+
+    rot_vel_true = df[[
+        "pitch_vel",
+        "roll_vel",
+        "yaw_vel"
+    ]].to_numpy()
+
+    rot_vel_cmd = df[[
+        "pitch_vel_cmd",
+        "roll_vel_cmd",
+        "yaw_vel_cmd"
+    ]].to_numpy()
+    
+    state_cmd = df[[
+        "x_pos_cmd",
+        "y_pos_cmd",
+        "z_pos_cmd",]
+        # "x_vel",
+        # "y_vel",
+        # "z_vel"]
+        # "pitch",
+        # "Roll",
+        # "Yaw",
+        # "pitch_vel",
+        # "roll_vel",
+        # "yaw_vel"
+        ].to_numpy()
+    
+    u_vec = df[[
+        f"U_{i}" for i in range(8)
+    ]].to_numpy()
+    
+    return SimObjectOutput(time, state_true, state_cmd,trans_vel_true=trans_vel_true, trans_vel_cmd=trans_vel_cmd, rot_true=rot_true, rot_cmd=rot_cmd, rot_vel_true=rot_vel_true, rot_vel_cmd=rot_vel_cmd, states=full_state,u_vector=u_vec)
 
 class BlizzardController(nn.Module):
     
-    def __init__(self):
+    def __init__(self, input_size=12, hidden_layer_size=256, output_size=8):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(input_size, hidden_layer_size, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
             nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(12, 12, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(12, 8, dtype=torch.float32)
+            nn.Linear(hidden_layer_size, output_size, dtype=torch.float32),
+            nn.Tanh(),
         )
         # print(self.network)
 
     def forward(self, x):
         return self.network(x)
 
-# class BlizzardController(nn.Module):
-#     def __init__(self, input_dim=12, output_dim=8):
-#         super(BlizzardController, self).__init__()
-#         self.fc1 = nn.Linear(input_dim, 144)
-#         self.relu = nn.ReLU(),
-#         nn.Linear(144, 144, dtype=torch.float32),
-#         nn.ReLU(),
-#         nn.Linear(144, 144, dtype=torch.float32),
-#         nn.ReLU(),
-#         nn.Linear(144, 144, dtype=torch.float32),
-#         nn.ReLU(),
-#         nn.Linear(144, 144, dtype=torch.float32),
-#         nn.ReLU(),
-#         nn.Linear(144, 144, dtype=torch.float32),
-#         nn.ReLU(),
-#         nn.Linear(144, 144, dtype=torch.float32),
-#         nn.ReLU(),
-#         self.fc2 = nn.Linear(128, output_dim)
-
-#     def forward(self, x):
-#         x = self.fc1(x)
-#         x = self.relu(x)
-#         x = self.fc2(x)
-#         return x  # Output is a control vector U
-
     
-def compute_trajectory_loss(sim_run: SimObjectOutput):
+def plot_run(sim_run: SimObjectOutput):
+    pass
 
+def position_plot(sim_run: SimObjectOutput, output_dir="data/results/object_position"):
+
+    meters = mpl.ticker.EngFormatter("m")
+    newtons = mpl.ticker.EngFormatter("N")
+    seconds = mpl.ticker.EngFormatter("s")
+    radians = mpl.ticker.EngFormatter("rad")
+    time = sim_run.time
+    obj_x = sim_run.trans_true[:,0]
+    obj_y = sim_run.trans_true[:,1]
+    obj_z = sim_run.trans_true[:,2]
+
+    fig, zplot = plt.subplots()
+    plothusly(zplot, time, obj_z, 
+            xtitle="Time [sec]",
+            ytitle="Position [m]]", 
+            datalabel="Z Position", 
+            title="Sim Obj Position")
+    plothus(zplot, time, obj_y, datalabel="Y Position")
+    plothus(zplot, time, obj_x, datalabel="X Position")
+
+    zplot.xaxis.set_major_formatter(seconds)
+    zplot.yaxis.set_major_formatter(meters)
+
+    fig.savefig(f"{output_dir}_pos.png")
+
+def loss_plot(sim_run: SimObjectOutput, output_dir="data/results/object"):
+    seconds = mpl.ticker.EngFormatter("s")
+    
+    loss = calculate_loss(sim_run)
+
+    fig, zplot = plt.subplots()
+    plothusly(zplot, sim_run.time, loss, 
+            xtitle="Time [sec]",
+            ytitle="Position [m]]", 
+            datalabel="Z Position", 
+            title="Sim Obj Position")
+    # plothus(zplot, time, obj_y, datalabel="Y Position")
+    # plothus(zplot, time, obj_x, datalabel="X Position")
+
+    zplot.xaxis.set_major_formatter(seconds)
+    # zplot.yaxis.set_major_formatter(meters)
+
+    fig.savefig(f"{output_dir}_loss.png")
+
+def plot_3D_trajectories(sim_run: SimObjectOutput):
+    """
+    Plot 3D trajectories of all objects using Plotly.
+
+    Args:
+    combined_data (list): List of tuples (object_id, dataframe) as returned by combine_csv_files.
+
+    Returns:
+    plotly.graph_objects.Figure: The Plotly figure object.
+    """
+    fig = go.Figure()
+
+    obj_x = sim_run.trans_true[:,0]
+    obj_y = sim_run.trans_true[:,1]
+    obj_z = sim_run.trans_true[:,2]
+
+    # for object in combined_data:
+    # object_id = object.id
+    # df = object.data
+    fig.add_trace(go.Scatter3d(
+        x=obj_x, y=obj_y, z=obj_z,
+        mode='lines',
+        name="sample"
+    ))
+
+    fig.update_layout(
+        title="3D Trajectories of Objects",
+        scene=dict(
+            xaxis_title="X",
+            yaxis_title="Y",
+            zaxis_title="Z",
+            aspectmode='data'
+        ),
+        legend_title="Objects"
+    )
+
+    return fig
+
+def plothusly(ax, x, y, *, xtitle='', ytitle='',
+              datalabel='', title='', linestyle='-',
+              marker=''):
+    """
+    A little function to make graphing less of a pain.
+    Creates a plot with titles and axis labels.
+    Adds a new line to a blank figure and labels it.
+
+    Parameters
+    ----------
+    ax : The graph object
+    x : X axis data
+    y : Y axis data
+    xtitle : Optional x axis data title. The default is ''.
+    ytitle : Optional y axis data title. The default is ''.
+    datalabel : Optional label for data. The default is ''.
+    title : Graph Title. The default is ''.
+
+    Returns
+    -------
+    out : Resultant graph.
+
+    """
+    ax.set_xlabel(xtitle)
+    ax.set_ylabel(ytitle)
+    ax.set_title(title)
+    out = ax.plot(x, y, zorder=1, label=datalabel, linestyle=linestyle,
+                  marker = marker)
+    ax.grid(True)
+    ax.legend(loc='best')
+    return out
+
+def plothus(ax, x, y, *, datalabel='', linestyle = '-',
+            marker = ''):
+    """
+    A little function to make graphing less of a pain
+
+    Adds a new line to a blank figure and labels it
+    """
+    out = ax.plot(x, y, zorder=1, label=datalabel, linestyle = linestyle,
+                  marker = marker)
+    ax.legend(loc='best')
+    return out
+
+def TransformationMatrix(phi, theta, psi, num_blocks=4):
+    """
+    Transforms 6 DOF state vector from body axis to earth axis
+
+    Parameters
+    ----------
+    phi : Roll angle in radians
+    theta : Pitch angle in radians
+    psi : Yaw angle in radians
+
+    Returns
+    -------
+    array : 12x12 transformation matrix
+    """
+    R = np.array([[np.cos(psi)*np.cos(theta), np.cos(psi)*np.sin(theta)*np.sin(phi)-np.sin(psi)*np.cos(phi), np.cos(psi)*np.sin(theta)*np.cos(phi)+np.sin(psi)*np.sin(phi)],
+                  [np.sin(psi)*np.cos(theta), np.sin(psi)*np.sin(theta)*np.sin(phi)+np.cos(psi)*np.cos(phi), np.sin(psi)*np.sin(theta)*np.cos(phi)-np.cos(psi)*np.sin(phi)],
+                  [-1*np.sin(theta), np.cos(theta)*np.sin(phi), np.cos(theta)*np.cos(phi)]])
+
+    return np.kron(np.eye(num_blocks, dtype=float), R)
+
+def compute_trajectory_reward(sim_run: SimObjectOutput):
+    def reward_func(time, true, cmd):
+        loss = 0
+        for i in range(1,len(time)):
+            loss -= np.linalg.norm(
+                np.abs(cmd[i, :] - true[i, :])**2
+                - 0.1 * (np.abs(true[i-1, :] - true[i, :])**2
+                        + np.abs(cmd[i, :] - true[i, :])**2)
+            )
+        return loss
+        
     # RMS of Position
-    pos_error = np.mean(
-        np.sqrt(
-            np.sum(
-                (sim_run.trans_cmd-sim_run.trans_true)**2
-            )
-        )
-    )
-
+    pos_error = reward_func(sim_run.time, sim_run.trans_true, sim_run.trans_cmd)
     
 
-    vel_error = np.mean(
-        np.sqrt(
-            np.sum(
-                (sim_run.trans_vel_cmd-sim_run.trans_vel_true)**2
-            )
-        )
-    )
+    vel_error = reward_func(sim_run.time, sim_run.trans_vel_true, sim_run.trans_vel_cmd)
 
-    rot_error = np.mean(
-        np.sqrt(
-            np.sum(
-                (sim_run.rot_cmd-sim_run.rot_true)**2
-            )
-        )
-    )
+    rot_error = reward_func(sim_run.time, sim_run.rot_true, sim_run.rot_cmd)
 
-    rot_vel_error = np.mean(
-        np.sqrt(
-            np.sum(
-                (sim_run.rot_vel_cmd-sim_run.rot_vel_true)**2
-            )
-        )
-    )
+    rot_vel_error = reward_func(sim_run.time, sim_run.rot_vel_true, sim_run.rot_vel_cmd)
 
-    return 5 * pos_error + 1 * vel_error + 5 * rot_error + 1 * rot_vel_error
-
-# def train_step(model, optimizer, batch_of_runs):
-#     optimizer.zero_grad()
-
-#     total_loss = 0
-#     for run in batch_of_runs:
-#         pass
-
-# def train_model(n_epochs, batch_size=32):
-#     model = BlizzardController()
-#     optimizer = torch.optim.Adam(model.parameters())
-
-#     for epoch in range(n_epochs):
-#         # create and run job here
-#         loss = train_step(model, optimizer, batch_runs)
+    # print(pos_error)
+    return 10 * pos_error + 1 * vel_error + 100 * rot_error + 1 * rot_vel_error
 
 # Rewrite later
 def keplerian_to_cartesian(a, e, i, Ω, ω, ν, μ=398600.4418):
@@ -861,7 +967,7 @@ def test_quadcopter():
     scene = Scenario(scenario_name=run_name, objects=objects, environments=environments, min_dt=1E-3, end_time=10.0)
     return scene
 
-def blizzard_test_object_setup():
+def blizzard_test_object_setup(fc=None):
 
     blizzard_graphical = GraphicalElement(
         name="blizzard_body_model",
@@ -887,7 +993,7 @@ def blizzard_test_object_setup():
     components = []
     for position in rotor_positions:
         components.append(
-            IdealThruster(time_constant=0.4,
+            IdealThruster(time_constant=0.01,
                           position=np.array([position])
                           )
         )
@@ -971,18 +1077,12 @@ def blizzard_test_object_setup():
 
     # print(K)
 
-    fc = FlightComputer(
-        sample_time=0.001,
-        sensors=[],
-        K=BlizzardController(),
-    )
-
-    # fc=FlightComputer(
-    #         sample_time=0.001,
-    #         sensors=[],
-    #         K=K,
-    #         # K = np.zeros((12,4))
-    #     )
+    if fc is None:
+        fc=FlightComputer(
+                sample_time=0.001,
+                sensors=[],
+                K=K,
+            )
 
 
     blizzard = SimObject(
@@ -1014,14 +1114,14 @@ def blizzard_test_object_setup():
         #     # K = np.zeros((12,4))
         # ),
         fc=fc,
-        recording_sample_time=0.1,
+        recording_sample_time=0.001,
         max_recorder_buffer_steps=1000,
         run_name="nn_train_att_1"
     )
 
     return blizzard
 
-def blizzard_hover_scenario_setup(name=""): 
+def blizzard_hover_scenario_setup(name="blizzard_hover_test"): 
     
     environments = [
         ConstantField(),
@@ -1035,11 +1135,11 @@ def blizzard_hover_scenario_setup(name=""):
         8,
     )
 
-    # object_list = [blizzard_instance for i in range(10)]
+    # object_list = [blizzard_instance for i in range(RUN_NUMS)]
     # print(object_list)
     object_list = [blizzard_instance]
 
-    return Scenario(scenario_name="blizzard_hover_test", end_time=15.0, min_dt=0.001, objects=object_list, environments=environments)
+    return Scenario(scenario_name=name, end_time=15.0, min_dt=0.001, objects=object_list, environments=environments)
 
 def blizzard_attitude_stabilization_setup(name="attitude_test"): 
     
@@ -1059,11 +1159,36 @@ def blizzard_attitude_stabilization_setup(name="attitude_test"):
         8,
     )
 
-    # object_list = [blizzard_instance for i in range(10)]
+    # object_list = [blizzard_instance for i in range(RUN_NUMS)]
     # print(object_list)
     object_list = [blizzard_instance]
 
-    return Scenario(scenario_name=name, end_time=60.0, min_dt=0.001, objects=object_list, environments=environments)
+    return Scenario(scenario_name=name, end_time=15.0, min_dt=0.001, objects=object_list, environments=environments)
+
+def blizzard_return_to_zero(name="displacement_test"): 
+    
+    environments = [
+        ConstantField(),
+        # PointMassGravity(mass=5.97219E24, position=np.array([0.0, 0.0, -6.378E6]))
+    ]
+
+    init_state = np.zeros((12,1))
+    init_state[0:3] = np.random.rand(3,1) * 10
+    
+
+    blizzard_instance = Object_Instance(
+        "blizzard",
+        init_state,
+        "RK4",
+        8,
+    )
+
+    # object_list = [blizzard_instance for i in range(RUN_NUMS)]
+    # print(object_list)
+    object_list = [blizzard_instance]
+
+    return Scenario(scenario_name=name, end_time=15.0, min_dt=0.001, objects=object_list, environments=environments)
+
 
 def nn_train_att_1():
     repeat_job = Job()
@@ -1085,121 +1210,413 @@ def nn_train_att_1():
 
     return repeat_job
 
-def train_model(job, model, optimizer, loss_function, num_epochs=100, noise_scale=0.1, num_variations=5):
-    input_dim = 12  # State vector size
-    onnx_path = job.path + "/objects/blizzard/blizzard.onnx"
+def load_all_simulation_runs(output_path):
+    """
+    Function that loads all sim runs into individual data structs
+    """
+    data_list = []
+    scenarios = os.listdir(output_path)
+    for scenario in scenarios:
+        csv_files = os.listdir(output_path+"/"+scenario)
+        [data_list.append(read_from_csv(output_path+"/"+scenario+"/"+file)) for file in csv_files]
 
-    best_loss = float("inf")
-    best_model_params = None
-
-    for epoch in range(num_epochs):
-        
-
-        # Try multiple weight variations
-        for _ in range(num_variations):
-            # Perturb weights slightly to explore new policies
-            with torch.no_grad():
-                for param in model.parameters():
-                    param += noise_scale * torch.randn_like(param)
-            job.export_job()
-            os.system("./target/release/sixdof")
-            import analyzedata
-            sim_output = SimObjectOutput.read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard_0.csv")
-        
-
-            # Load simulation results
-            loss_value = compute_trajectory_loss(sim_output)
-
-            # Keep track of the best policy
-            if loss_value < best_loss:
-                best_loss = loss_value
-                best_model_params = {k: v.clone() for k, v in model.state_dict().items()}
-
-        # Update model weights to the best-performing one
-        if best_model_params:
-            model.load_state_dict(best_model_params)
-
-        # Print progress
-        if epoch % 10 == 0:
-            print(f"Epoch {epoch}, Best Loss: {best_loss:.4f}")
-            # analyze_scenario("data/todo/default_name/output/blizzard_hover_test")
-
-def train_evolution_strategy(job, model, num_generations=50, population_size=10, mutation_scale=0.1):
-    input_dim = 12  # State vector size
-    # onnx_path = job.path + "/objects/blizzard/blizzard.onnx"
-
-    best_model_params = {k: v.clone() for k, v in model.state_dict().items()}
-    best_loss = float("inf")
-
-    for generation in range(num_generations):
-        population = []
-
-        # Generate population by mutating the best model
-        for _ in range(population_size):
-            new_model = BlizzardController()
-            new_model.load_state_dict(best_model_params)
-
-            with torch.no_grad():
-                for param in new_model.parameters():
-                    param += mutation_scale * torch.randn_like(param)
-
-            population.append(new_model)
-
-        # Evaluate population
-        for candidate_model in population:
-            job.objects[0].fc.K.network = candidate_model
-            job.export_job()
-            os.system("./target/release/sixdof")
-            # import analyzedata
-            sim_output = SimObjectOutput.read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard_0.csv")
-            loss_value = compute_trajectory_loss(sim_output)
-
-            if loss_value < best_loss:
-                best_loss = loss_value
-                best_model_params = {k: v.clone() for k, v in candidate_model.state_dict().items()}
-
-        print(f"Generation {generation}, Best Loss: {best_loss:.4f}")
-
-    # Load the best model
-    # model.load_state_dict(best_model_params)
+    return data_list
 
 def basic_job():
     job = Job()
 
     job.add_object(blizzard_test_object_setup())
+
+    mixer = np.array([[0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # X Forces
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Y Forces
+                  [1, 1, 1, 1, 1, 1, 1, 1],  # Z Forces
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty 
+                  [0, 0, 0, 0, 0, 0, 0, 0],  # Empty 
+                  [3, -3, 3, -3, 3, -3, 3, -3],  # X Moments (Roll)
+                  [2.5, 2.5, -2.5, -2.5, 2.5, 2.5, -2.5, -2.5],  # Y Moments (Pitch)
+                  [-1, 1, 1, -1, 1, -1, -1, 1]], dtype=float)  # Z Moments (Yaw)
+
+    K = np.loadtxt("data/todo/default_name/objects/blizzard/Klqr.csv", dtype=float, delimiter=',')
+
+    K[9,1] = -0.1*K[9,6]
+    K[9,4] = -0.3*K[9,9]
+
+    K[10,0] = 0.1*K[10,7]
+    K[10,3] = 0.3*K[10,10]
+    
+    K = mixer.transpose() @ -K
+
+    fc=FlightComputer(
+            sample_time=0.001,
+            sensors=[],
+            K=K,
+            # K = np.zeros((12,4))
+        )
+
     job.add_scenario(blizzard_hover_scenario_setup())
-    [job.add_scenario(blizzard_attitude_stabilization_setup(f"attitude_test_{i}")) for i in range(5)]
+    [job.add_scenario(blizzard_attitude_stabilization_setup(f"attitude_test_{i}")) for i in range(RUN_NUMS)]
+    [job.add_scenario(blizzard_return_to_zero(f"displacemnet_test_{i}")) for i in range(RUN_NUMS)]
 
-    # job.add_scenario(test_scenario())
-    # job.add_scenario(test_quadcopter())
-    # job.add_scenario()
-    # test_scenario()
-    # test_quadcopter()
-    # test_constellation_scenario()
+    return job
 
-    job.export_job()
+def call_sim():
+    # print(os.name)
+    if os.name == 'posix':
+        os.system('./target/release/sixdof')
+    else: 
+        os.system('target\\release\\sixdof.exe')
+    return load_all_simulation_runs("data/todo/default_name/output")
 
-    # dummy_input = torch.zeros(1,12)
-    # controller = BlizzardController()
-    # torch.onnx.export(
-    #     controller,
-    #     dummy_input,
-    #     "data/todo/default_name/objects/blizzard/blizzard_controller.onnx",
-    #     export_params=True,
-    #     opset_version=11,
-    #     do_constant_folding=True,
-    #     input_names=['input'],
-    #     output_names=['output']
-    # )
+def calculate_loss(sim_run: SimObjectOutput):
+    loss = np.zeros_like(sim_run.time)
+    loss += 10*calculate_position_step_loss(sim_run)
+    return loss
+
+def calculate_reward_vector(sim_run: SimObjectOutput):
+    reward = np.zeros_like(sim_run.time)
+    reward += calculate_relevant_velocity_reward(sim_run)
+    reward += calculate_position_reward(sim_run)
+    reward += calculate_rotation_reward(sim_run)
+    reward += calculate_relevant_rotation_velocity_reward(sim_run)
+
+    return reward
+
+def reward_plot(sim_run: SimObjectOutput, output_dir='data/results/object'):
+    reward = calculate_reward_vector(sim_run)
+    seconds = mpl.ticker.EngFormatter("s")
+    fig, zplot = plt.subplots()
+    plothusly(zplot, sim_run.time, reward, 
+            xtitle="Time [sec]",
+            ytitle="Position [m]]", 
+            datalabel="Z Position", 
+            title="Sim Obj Reward")
+    # plothus(zplot, time, obj_y, datalabel="Y Position")
+    # plothus(zplot, time, obj_x, datalabel="X Position")
+
+    zplot.xaxis.set_major_formatter(seconds)
+    fig.savefig(f"{output_dir}_reward.png")
+
+def attitude_plot(sim_run: SimObjectOutput, output_dir='data/results/object'):
+    fig, zplot = plt.subplots()
+    seconds = mpl.ticker.EngFormatter("s")
+    time = sim_run.time
+    pitch = sim_run.rot_true[:,0]
+    roll = sim_run.rot_true[:,1]
+    yaw = sim_run.rot_true[:,2]
+
+    fig, zplot = plt.subplots()
+    plothusly(zplot, time, pitch, 
+            xtitle="Time [sec]",
+            ytitle="Position [m]]", 
+            datalabel="Pitch", 
+            title="Sim Obj Attitude")
+    plothus(zplot, time, roll, datalabel="Roll")
+    plothus(zplot, time, yaw, datalabel="Yaw")
+    fig.savefig(f"{output_dir}_attitude.png")
+
+def calculate_position_reward(sim_run: SimObjectOutput):
+    err = sim_run.trans_cmd - sim_run.trans_true
+    reward = np.array(
+        [1E4*np.exp(-np.linalg.norm(err_point)) for err_point in(err)]
+    )
+    return reward
+
+def calculate_rotation_reward(sim_run: SimObjectOutput):
+    err = sim_run.rot_cmd - sim_run.rot_true
+    reward = np.array(
+        [1E4*np.exp(-np.linalg.norm(err_point)) for err_point in(err)]
+    )
+    return reward
+    
+def calculate_relevant_velocity_reward(sim_run: SimObjectOutput):
+    reward = np.zeros_like(sim_run.time)
+    dt = np.abs(sim_run.time[1]-sim_run.time[0])
+    err = sim_run.trans_cmd - sim_run.trans_true
+    reward = np.array(
+        [np.linalg.norm(err_point)*np.dot(vel_true, err_point) for vel_true, err_point in zip(sim_run.trans_vel_true, err)]
+        )
+    
+    return reward
+
+def calculate_relevant_rotation_velocity_reward(sim_run: SimObjectOutput):
+    reward = np.zeros_like(sim_run.time)
+    dt = np.abs(sim_run.time[1]-sim_run.time[0])
+    err = sim_run.rot_cmd - sim_run.rot_true
+    reward = np.array(
+        [np.linalg.norm(err_point)*np.dot(vel_true, err_point) for vel_true, err_point in zip(sim_run.rot_vel_true, err)]
+        )
+    
+    return reward
+
+def calculate_position_step_loss(sim_run: SimObjectOutput):
+    err = sim_run.trans_cmd - sim_run.trans_true
+    pos_err_log_loss = np.zeros_like(sim_run.time)
+    for i, err_point in enumerate(err):
+        pos_err_log_loss[i] = np.linalg.norm(err_point)
+    return pos_err_log_loss
+
+def nn_att_2():
+    job = Job()
+
+    job.add_object(blizzard_test_object_setup(
+        fc=FlightComputer(sample_time=0.001, sensors=[], K = BlizzardController())
+    ))
+    job.add_scenario(blizzard_hover_scenario_setup())
+    job.objects[0].fc.set_NN_filepath(job.path+"/objects/blizzard/blizzard.onnx")
+    [job.add_scenario(blizzard_attitude_stabilization_setup(f"attitude_test_{i}")) for i in range(RUN_NUMS)]
+    [job.add_scenario(blizzard_return_to_zero(f"displacemnet_test_{i}")) for i in range(RUN_NUMS)]
+    return job
+
+# def optimize_model(job, sim_run: SimObjectOutput, model: nn.Module, optimizer: torch.optim.Optimizer, num_epochs=50):
+#     states, next_states, inputs = sim_run.to_vector()
+#     states = torch.tensor(states, dtype=torch.float32)
+#     next_states = torch.tensor(next_states, dtype=torch.float32)
+#     actions = torch.tensor(inputs, dtype=torch.float32)
+#     rewards = torch.tensor(calculate_reward_vector(sim_run), dtype=torch.float32)
+
+
+
+#     for epoch in range(num_epochs):  
+#         optimizer.zero_grad()  # Reset gradients
+
+#         job.export()        # Export NN to file
+#         call_sim()          # Runs simulation with current iteration of neural net
+
+#         # Compute loss value here? IDK
+
+#         loss.backward()  # Compute gradients
+#         optimizer.step()  # Update weights
+
+#         print(f"Epoch {epoch}: Loss = {loss.item()}")
+
+def calculate_reward_from_multiple_outputs(sim_run_vector):
+    reward_vec = None
+    for run in sim_run_vector:
+        if reward_vec is None:
+            reward_vec = calculate_reward_vector(run)
+        else:
+            reward_vec = np.concatenate([reward_vec, calculate_reward_vector(run)], axis=0)
+
+    return reward_vec
+
+def add_gradient_noise(model, noise_factor=0.01):
+    for param in model.parameters():
+        if param.grad is not None:
+            param.grad += noise_factor * torch.randn_like(param.grad)
+
+
+def optimize_model(job: Job, sim_data_vector: [SimObjectOutput], model: nn.Module, optimizer: torch.optim.Optimizer, 
+                  *, num_epochs: int = 50, batch_size: int = 64, gamma: float = 0.99, pretraining_epochs=100,
+                  plateau_patience: int=5, noise_factor: float = 0.01, loss_threshold: float = 10e3):
+    """
+    Optimize the neural network model using collected simulation data.
+    
+    Args:
+        job: Simulation job object
+        sim_run: Simulation output containing states and actions
+        model: Neural network model to optimize
+        optimizer: PyTorch optimizer
+        num_epochs: Number of training epochs
+        batch_size: Size of training batches
+        gamma: Discount factor for future rewards
+    """
+    # Convert simulation data to tensors
+    states, next_states, actions = get_data_from_sim_run_list(sim_data_vector)
+    states = torch.tensor(states, dtype=torch.float32)
+    next_states = torch.tensor(next_states, dtype=torch.float32)
+    actions = torch.tensor(actions, dtype=torch.float32)
+    rewards = torch.tensor(calculate_reward_from_multiple_outputs(sim_data_vector), dtype=torch.float32)
+    
+    # Setup learning rate scheduler
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, 
+                                patience=plateau_patience)
+    
+    # Setup plateau detection
+    best_loss = float('inf')
+    plateau_count = 0
+    plateau_threshold = 1e-4
+    
+    # Pretraining epochs
+    for epoch in range(pretraining_epochs):
+        n_samples = len(states)
+        n_batches = n_samples // batch_size
+        total_loss = 0.0
+        
+        # Shuffle data for each epoch
+        indices = torch.randperm(n_samples)
+        
+        for batch in range(n_batches):
+            optimizer.zero_grad()
+            
+            # Get batch indices
+            start_idx = batch * batch_size
+            end_idx = start_idx + batch_size
+            batch_indices = indices[start_idx:end_idx]
+            
+            # Get batch data
+            batch_states = states[batch_indices]
+            batch_next_states = next_states[batch_indices]
+            batch_actions = actions[batch_indices]
+            batch_rewards = rewards[batch_indices]
+            
+            # Compute current Q-values and get the Q-values for the taken actions
+            current_q_values = model(batch_states)
+            action_q_values = torch.sum(current_q_values * batch_actions, dim=1)
+            
+            # Compute next Q-values with target network
+            with torch.no_grad():
+                next_q_values = model(batch_next_states)
+                max_next_q_values, _ = next_q_values.max(dim=1)
+                target_q_values = batch_rewards + gamma * max_next_q_values
+            
+            # Compute loss - ensure dimensions match
+            loss = nn.MSELoss()(action_q_values, target_q_values)
+            
+            # Backward pass and optimization
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+        # Print epoch statistics
+        avg_loss = total_loss / n_batches
+
+        # Update learning rate scheduler
+        scheduler.step(avg_loss)
+        
+        # Check for plateau
+        if abs(avg_loss - best_loss) < plateau_threshold:
+            plateau_count += 1
+            if plateau_count >= 3:  # If stuck for 3 epochs
+                print(f"Plateau detected! Increasing noise factor temporarily...")
+                temp_noise = noise_factor * 2.0  # Temporarily increase noise
+                add_gradient_noise(model, temp_noise)
+                plateau_count = 0
+        else:
+            plateau_count = 0
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+
+        print(f"Pretraining epoch {epoch + 1}/{num_epochs}: Average Loss = {avg_loss:,.4f}")
+
+    # Calculate number of batches
+    for epoch in range(num_epochs):
+        n_samples = len(states)
+        n_batches = n_samples // batch_size
+        total_loss = 0.0
+        
+        # Shuffle data for each epoch
+        indices = torch.randperm(n_samples)
+        
+        for batch in range(n_batches):
+            optimizer.zero_grad()
+            
+            # Get batch indices
+            start_idx = batch * batch_size
+            end_idx = start_idx + batch_size
+            batch_indices = indices[start_idx:end_idx]
+            
+            # Get batch data
+            batch_states = states[batch_indices]
+            batch_next_states = next_states[batch_indices]
+            batch_actions = actions[batch_indices]
+            batch_rewards = rewards[batch_indices]
+            
+            # Compute current Q-values and get the Q-values for the taken actions
+            current_q_values = model(batch_states)
+            action_q_values = torch.sum(current_q_values * batch_actions, dim=1)
+            
+            # Compute next Q-values with target network
+            with torch.no_grad():
+                next_q_values = model(batch_next_states)
+                max_next_q_values, _ = next_q_values.max(dim=1)
+                target_q_values = batch_rewards + gamma * max_next_q_values
+            
+            # Compute loss - ensure dimensions match
+            loss = nn.MSELoss()(action_q_values, target_q_values)
+            
+            # Backward pass and optimization
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            
+        # Export model and run simulation
+        if epoch % 10 == 0:  # Run sim every 10 batches to save time
+            job.export_job()
+            sim_data_vector = call_sim()
+            sim_run=sim_data_vector[0]
+
+            states, next_states, actions = get_data_from_sim_run_list(sim_data_vector)
+            
+            states = torch.tensor(states, dtype=torch.float32)
+            next_states = torch.tensor(next_states, dtype=torch.float32)
+            actions = torch.tensor(actions, dtype=torch.float32)
+            rewards = torch.tensor(calculate_reward_from_multiple_outputs(sim_data_vector), dtype=torch.float32)
+            
+            # Get new simulation results and update rewards if needed
+            # Note: You might want to implement a method to get new sim results
+                
+        # Print epoch statistics
+        avg_loss = total_loss / n_batches
+        # Update learning rate scheduler
+        scheduler.step(avg_loss)
+        
+        # Check for plateau
+        if abs(avg_loss - best_loss) < plateau_threshold:
+            plateau_count += 1
+            if plateau_count >= 3:  # If stuck for 3 epochs
+                print(f"Plateau detected! Increasing noise factor temporarily...")
+                temp_noise = noise_factor * 2.0  # Temporarily increase noise
+                add_gradient_noise(model, temp_noise)
+                plateau_count = 0
+        else:
+            plateau_count = 0
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+        print(f"Epoch {epoch + 1}/{num_epochs}: Average Loss = {avg_loss:,.4f}")
+        
+        # Optional: Early stopping if loss is small enough
+        if avg_loss < 1e-4:
+            print("Converged! Stopping early.")
+            break
+        position_plot(sim_run)
+        loss_plot(sim_run)
+        reward_plot(sim_run)
+        attitude_plot(sim_run)
+    
+    return model
+
+def get_data_from_sim_run_list(sim_runs):
+    states, next_states, actions = None,None,None
+    for run in sim_runs:
+        if states is None:
+            states, next_states, actions = run.to_vector()
+        else:
+            state_local, next_state_local, actions_local = run.to_vector()
+            states = np.concatenate([states, next_state_local], axis=0)
+            next_states = np.concatenate([next_states, state_local], axis=0)
+            actions = np.concatenate([actions, actions_local], axis=0)
+    return states, next_states, actions
 
 if __name__ == "__main__":
-    job = nn_train_att_1()
+    primer_job = basic_job()
+    primer_job.export_job()
+    sim_data_vector = call_sim()
 
+    job = nn_att_2()
 
-    model = job.objects[0].fc.K
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-    # train_model(job, model, optimizer, compute_trajectory_loss, num_epochs=100, noise_scale=0.1, num_variations=5)
-    train_evolution_strategy(job, model, num_generations=50, population_size=10, mutation_scale=5.0)
-    # basic_job()
-
+    # sim_data = read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv")
+    # print(job.objects[0].fc.K.parameters())
+    # print(optimizer)
+    # print(sim_data.trans_true[:,2])
+    # plot_3D_trajectories(sim_data).show()
+    
+    # position_plot(sim_data)
+    # loss_plot(sim_data)
+    # reward_plot(sim_data)
+    optimizer = torch.optim.Adam(job.objects[0].fc.K.parameters(), lr=LR)
+    optimize_model(job, sim_data_vector, job.objects[0].fc.K, optimizer,num_epochs=100, batch_size=1256, pretraining_epochs=300)
