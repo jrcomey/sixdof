@@ -163,8 +163,7 @@ impl<const U: usize> FlightControl<U> for NNComputer<U>{
     }
 
     fn calculate_u(&self, current_state: State) -> Inputs<U> {
-        let err: State = rotation_frame(&current_state[6], &current_state[7], &current_state[8]).transpose()
-        * (State::zeros() - current_state);
+        let err: State = (State::zeros() - current_state);
 
         let input: Tensor = tract_ndarray::Array2::<f32>::from_shape_fn(
             (1,12),

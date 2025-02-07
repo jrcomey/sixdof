@@ -284,7 +284,7 @@ impl ComponentPart for IdealThruster {
 
         // self.force = self.set_force;
 
-        self.force = force_at_time_step;
+        self.force = limit_value(force_at_time_step, self.maximum_force_magnitude, 0.0);
     }
 
     fn set_force(&mut self, new_force: f64) {

@@ -23,6 +23,10 @@ use crate::graphical::{self, GraphicalData};
 use std::fs::File;
 use crate::components::*;
 use crate::fc;
+use rayon::prelude::*;
+use std::sync::Arc;
+use std::io;
+// use std::path::Path;
 
 /// Data transmission constant for chunk size, set at 4kB
 const CHUNK_SIZE: usize = 4096;
@@ -99,7 +103,7 @@ impl Sim {
     pub fn run_until(&mut self, end_time: f64) -> Result<(), Error>{
         info!("Running sim until t={} seconds.", end_time);
         self.end_time = end_time;
-        let mut bar = ProgressBar::new((end_time / self.dt) as u64);
+        // let mut bar = ProgressBar::new((end_time / self.dt) as u64);
         let mut graphical_frame_counter: u64 = 0;
         let graphical_update_max = 5000;
         // let next_update = Duration::from_micros(33_333);
@@ -153,7 +157,7 @@ impl Sim {
             }
             self.current_time = self.current_time + self.dt;
             self.steps += 1;
-            bar.inc(1);
+            // bar.inc(1);
         }
 
         Ok(())
@@ -193,6 +197,7 @@ impl Sim {
         for object in &mut self.objects {
             let filepath = "".to_owned() + folderpath+"/object_"+object.get_name()+".csv";
             object.export_data(&filepath);
+            object.combine_csv_files().unwrap();
         }
     }
 
@@ -206,20 +211,41 @@ impl Sim {
         let scenario_file_path = job.clone() + "/scenarios";
         let scenarios = get_files(&scenario_file_path).expect("No scenarios in file");
 
-        let mut scenario_vector = vec![];
-        for scenario in scenarios {
-            let scenario_loaded = ScenarioInfo::new(job.clone(), scenario);
-            debug!("JOB NAME: {}", scenario_loaded.job_name);
-            debug!("SCENARIO NAME: {}", scenario_loaded.scenario_name);
-            scenario_vector.push(scenario_loaded);
-        }
+        // let mut scenario_vector = vec![];
+        // for scenario in scenarios {
+        //     let scenario_loaded = ScenarioInfo::new(job.clone(), scenario);
+        //     debug!("JOB NAME: {}", scenario_loaded.job_name);
+        //     debug!("SCENARIO NAME: {}", scenario_loaded.scenario_name);
+        //     scenario_vector.push(scenario_loaded);
+        // }
 
-        for scenario in scenario_vector {
-            let mut sim = Sim::load_scenario(scenario);
+        // for scenario in scenario_vector {
+        //     let mut sim = Sim::load_scenario(scenario);
+        //     // sim.datacom_start("localhost:8080").expect("No connection established.");
+        //     sim.run();
+        //     sim.record_run("data/todo/default_name/output");
+        // }
+
+        // AI code
+        let scenario_vector: Vec<_> = scenarios
+            .par_iter() // Parallel iterator
+            .map(|scenario| {
+                let scenario_loaded = ScenarioInfo::new(job.clone(), scenario.clone());
+                debug!("JOB NAME: {}", scenario_loaded.job_name);
+                debug!("SCENARIO NAME: {}", scenario_loaded.scenario_name);
+                scenario_loaded
+            })
+            .collect();
+
+        // let mut bar = RwLock::new(ProgressBar::new((scenario_vector.len()) as u64));
+
+        scenario_vector.par_iter().for_each(|scenario| {
+            let mut sim = Sim::load_scenario(scenario.clone());
             // sim.datacom_start("localhost:8080").expect("No connection established.");
             sim.run();
             sim.record_run("data/todo/default_name/output");
-        }
+            // bar.write().unwrap().inc(1);
+        });
 
         
 
@@ -537,7 +563,7 @@ pub trait Simulatable {
     fn datacom_json_initialize(&mut self) -> Option<serde_json::Value>;
     fn datacom_json_command_step(&self) -> Option<Vec<Value>>;
     fn calculate_environmental_acceleration(&self, environment_vector: &Vec<Box<dyn environments::EnviromentalEffect>>) -> State;
-    
+    fn combine_csv_files(&self) -> std::io::Result<()>;
 }
 
 static OBJECT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1111,6 +1137,10 @@ impl<const U: usize> Simulatable for Vehicle<U> {
         let environment_state_xdot: State =  environment_vector.into_iter().map(|environment| environment.calculate_acceleration_on_object(&self.mass, &self.position)).sum();
         return environment_state_xdot;
     }
+
+    fn combine_csv_files(&self) -> std::io::Result<()> {
+        self.data.combine_csv_files()
+    }
 }
 
 impl<const U: usize> Default for Vehicle<U> {
@@ -1285,6 +1315,8 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             num_refresh: 0
         };
 
+        clean_parent_directory(storage_directory);
+
         debug!("Datalogger filepath: {}", d.storage_directory);
         return d;
     }
@@ -1375,6 +1407,127 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
     pub fn how_many_steps(&self) -> u64 {
         self.time_vector.len() as u64
     }
+
+    pub fn combine_csv_files(&self) -> std::io::Result<()> {
+        use std::fs::{self, File};
+        use std::io::{BufReader, BufRead, Write, BufWriter};
+        use std::path::Path;
+        use std::collections::BinaryHeap;
+        use std::cmp::Ordering;
+        
+        // Structure to hold a line of data with its timestamp
+        #[derive(Debug)]
+        struct TimeRow {
+            timestamp: f64,
+            line: String,
+            file_index: usize,
+        }
+
+        // Custom ordering for TimeRow to create a min-heap
+        impl Ord for TimeRow {
+            fn cmp(&self, other: &Self) -> Ordering {
+                other.timestamp.partial_cmp(&self.timestamp).unwrap_or(Ordering::Equal)
+            }
+        }
+
+        impl PartialOrd for TimeRow {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        impl PartialEq for TimeRow {
+            fn eq(&self, other: &Self) -> bool {
+                self.timestamp == other.timestamp
+            }
+        }
+
+        impl Eq for TimeRow {}
+
+        let base_path = Path::new(&self.storage_directory);
+        let combined_path = format!("{}.csv", self.storage_directory);
+        
+        // Get all CSV files that match our pattern
+        let mut files: Vec<String> = Vec::new();
+        for i in 0..=self.num_refresh {
+            let filename = format!("{}_{}.csv", self.storage_directory, i);
+            if Path::new(&filename).exists() {
+                files.push(filename);
+            }
+        }
+
+        if files.is_empty() {
+            return Ok(());
+        }
+
+        // Create file readers for each input file
+        let mut readers: Vec<BufReader<File>> = files
+            .iter()
+            .map(|f| BufReader::new(File::open(f).unwrap()))
+            .collect();
+
+        // Create the output file with a buffer
+        let output_file = File::create(&combined_path)?;
+        let mut writer = BufWriter::new(output_file);
+
+        // Copy header from first file
+        let mut header = String::new();
+        readers[0].read_line(&mut header)?;
+        writer.write_all(header.as_bytes())?;
+
+        // Skip headers in other files
+        for reader in readers.iter_mut().skip(1) {
+            let mut temp = String::new();
+            reader.read_line(&mut temp)?;
+        }
+
+        // Initialize priority queue for sorting
+        let mut heap = BinaryHeap::new();
+        let mut line_buffers: Vec<String> = vec![String::new(); readers.len()];
+        
+        // Read first line from each file
+        for (i, reader) in readers.iter_mut().enumerate() {
+            if reader.read_line(&mut line_buffers[i])? > 0 {
+                if let Some(timestamp) = parse_timestamp(&line_buffers[i]) {
+                    heap.push(TimeRow {
+                        timestamp,
+                        line: line_buffers[i].clone(),
+                        file_index: i,
+                    });
+                }
+            }
+        }
+
+        // Process lines in timestamp order
+        while let Some(TimeRow { line, file_index, .. }) = heap.pop() {
+            // Write the current line
+            writer.write_all(line.as_bytes())?;
+            
+            // Read next line from the file we just used
+            line_buffers[file_index].clear();
+            if readers[file_index].read_line(&mut line_buffers[file_index])? > 0 {
+                if let Some(timestamp) = parse_timestamp(&line_buffers[file_index]) {
+                    heap.push(TimeRow {
+                        timestamp,
+                        line: line_buffers[file_index].clone(),
+                        file_index,
+                    });
+                }
+            }
+        }
+
+        // Ensure all data is written
+        writer.flush()?;
+
+        // Clean up component files
+        for file_path in files {
+            fs::remove_file(file_path)?;
+        }
+
+        Ok(())
+    }
+
+    
 } 
 
 impl<const S: usize, const U: usize> Default for DataLogger<S, U> {
@@ -1434,4 +1587,89 @@ fn get_files(path: &str) -> Result<Vec<String>, std::io::Error> {
         .filter(|entry| entry.path().is_file())
         .filter_map(|entry| entry.path().to_str().map(String::from))
         .collect())
+}
+fn clean_parent_directory<P: AsRef<Path>>(dir_path: P) -> io::Result<bool> {
+    let dir_path = dir_path.as_ref();
+    
+    // Get parent directory
+    let parent_dir = dir_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "No parent directory exists (might be root)"
+        )
+    })?;
+    
+    // Check if parent directory exists and is a directory
+    if !parent_dir.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Parent path is not a directory"
+        ));
+    }
+
+    // Read directory entries
+    let entries = fs::read_dir(parent_dir)?;
+    let mut has_files = false;
+    let mut files_to_delete = Vec::new();
+
+    // First pass: check for files and collect them
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_file() {
+            has_files = true;
+            files_to_delete.push(path);
+        }
+    }
+
+    // If files were found, delete them
+    if has_files {
+        for file_path in files_to_delete {
+            fs::remove_file(file_path)?;
+        }
+    }
+
+    Ok(has_files)
+}
+
+// Keep the original function for flexibility
+fn clean_directory<P: AsRef<Path>>(dir_path: P) -> io::Result<bool> {
+    let dir_path = dir_path.as_ref();
+    
+    if !dir_path.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Specified path is not a directory"
+        ));
+    }
+
+    let entries = fs::read_dir(dir_path)?;
+    let mut has_files = false;
+    let mut files_to_delete = Vec::new();
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_file() {
+            has_files = true;
+            files_to_delete.push(path);
+        }
+    }
+
+    if has_files {
+        for file_path in files_to_delete {
+            fs::remove_file(file_path)?;
+        }
+    }
+
+    Ok(has_files)
+}
+
+/// Helper function to parse timestamp from a CSV line
+fn parse_timestamp(line: &str) -> Option<f64> {
+    line.split(',')
+        .next()
+        .and_then(|s| s.trim().parse::<f64>().ok())
 }
