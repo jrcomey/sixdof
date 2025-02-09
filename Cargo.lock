@@ -1144,6 +1144,7 @@ dependencies = [
  "log",
  "nalgebra",
  "pretty_env_logger",
+ "rayon",
  "serde",
  "serde_json",
  "tobj",

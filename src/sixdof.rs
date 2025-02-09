@@ -237,14 +237,14 @@ impl Sim {
             })
             .collect();
 
-        // let mut bar = RwLock::new(ProgressBar::new((scenario_vector.len()) as u64));
+        let mut bar = RwLock::new(ProgressBar::new((scenario_vector.len()) as u64));
 
         scenario_vector.par_iter().for_each(|scenario| {
             let mut sim = Sim::load_scenario(scenario.clone());
             // sim.datacom_start("localhost:8080").expect("No connection established.");
             sim.run();
             sim.record_run("data/todo/default_name/output");
-            // bar.write().unwrap().inc(1);
+            bar.write().unwrap().inc(1);
         });
 
         
