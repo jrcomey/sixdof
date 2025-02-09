@@ -1216,8 +1216,12 @@ def load_all_simulation_runs(output_path):
     """
     data_list = []
     scenarios = os.listdir(output_path)
+    # print(f"Scenarios: {scenarios}")
     for scenario in scenarios:
         csv_files = os.listdir(output_path+"/"+scenario)
+        # print(f"Output path: {output_path}")
+        # print(scenario)
+        # print(csv_files)
         [data_list.append(read_from_csv(output_path+"/"+scenario+"/"+file)) for file in csv_files]
 
     return data_list
@@ -1359,39 +1363,21 @@ def calculate_position_step_loss(sim_run: SimObjectOutput):
         pos_err_log_loss[i] = np.linalg.norm(err_point)
     return pos_err_log_loss
 
-def nn_att_2():
+def nn_att_2(fc=None):
     job = Job()
-
-    job.add_object(blizzard_test_object_setup(
-        fc=FlightComputer(sample_time=0.001, sensors=[], K = BlizzardController())
-    ))
+    if fc is None:
+        job.add_object(blizzard_test_object_setup(
+            fc=FlightComputer(sample_time=0.001, sensors=[], K = BlizzardController())
+        ))
+    else:
+        job.add_object(blizzard_test_object_setup(
+            fc=fc
+        ))
     job.add_scenario(blizzard_hover_scenario_setup())
     job.objects[0].fc.set_NN_filepath(job.path+"/objects/blizzard/blizzard.onnx")
     [job.add_scenario(blizzard_attitude_stabilization_setup(f"attitude_test_{i}")) for i in range(RUN_NUMS)]
     [job.add_scenario(blizzard_return_to_zero(f"displacemnet_test_{i}")) for i in range(RUN_NUMS)]
     return job
-
-# def optimize_model(job, sim_run: SimObjectOutput, model: nn.Module, optimizer: torch.optim.Optimizer, num_epochs=50):
-#     states, next_states, inputs = sim_run.to_vector()
-#     states = torch.tensor(states, dtype=torch.float32)
-#     next_states = torch.tensor(next_states, dtype=torch.float32)
-#     actions = torch.tensor(inputs, dtype=torch.float32)
-#     rewards = torch.tensor(calculate_reward_vector(sim_run), dtype=torch.float32)
-
-
-
-#     for epoch in range(num_epochs):  
-#         optimizer.zero_grad()  # Reset gradients
-
-#         job.export()        # Export NN to file
-#         call_sim()          # Runs simulation with current iteration of neural net
-
-#         # Compute loss value here? IDK
-
-#         loss.backward()  # Compute gradients
-#         optimizer.step()  # Update weights
-
-#         print(f"Epoch {epoch}: Loss = {loss.item()}")
 
 def calculate_reward_from_multiple_outputs(sim_run_vector):
     reward_vec = None
@@ -1407,7 +1393,6 @@ def add_gradient_noise(model, noise_factor=0.01):
     for param in model.parameters():
         if param.grad is not None:
             param.grad += noise_factor * torch.randn_like(param.grad)
-
 
 def optimize_model(job: Job, sim_data_vector: [SimObjectOutput], model: nn.Module, optimizer: torch.optim.Optimizer, 
                   *, num_epochs: int = 50, batch_size: int = 64, gamma: float = 0.99, pretraining_epochs=100,
@@ -1605,18 +1590,19 @@ def get_data_from_sim_run_list(sim_runs):
 if __name__ == "__main__":
     primer_job = basic_job()
     primer_job.export_job()
+    # print(primer_job.path)
     sim_data_vector = call_sim()
 
     job = nn_att_2()
 
-    # sim_data = read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv")
-    # print(job.objects[0].fc.K.parameters())
-    # print(optimizer)
-    # print(sim_data.trans_true[:,2])
-    # plot_3D_trajectories(sim_data).show()
+    # # sim_data = read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv")
+    # # print(job.objects[0].fc.K.parameters())
+    # # print(optimizer)
+    # # print(sim_data.trans_true[:,2])
+    # # plot_3D_trajectories(sim_data).show()
     
     # position_plot(sim_data)
     # loss_plot(sim_data)
     # reward_plot(sim_data)
     optimizer = torch.optim.Adam(job.objects[0].fc.K.parameters(), lr=LR)
-    optimize_model(job, sim_data_vector, job.objects[0].fc.K, optimizer,num_epochs=100, batch_size=1256, pretraining_epochs=300)
+    optimize_model(job, sim_data_vector, job.objects[0].fc.K, optimizer, num_epochs=100, batch_size=1256, pretraining_epochs=300)
