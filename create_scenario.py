@@ -23,7 +23,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 # Constants
 # BATCH_SIZE = 32
 LR = 1E-3
-RUN_NUMS = 100
+RUN_NUMS = 0
 
 class Job:
 
@@ -399,6 +399,41 @@ class SimObjectOutput:
         u = self.u_vector[:-1,:]
         # print(u.shape)
         return states, next_states, u
+    
+    def compute_acceleration(self):
+        dt = np.diff(self.time)
+        
+        # Compute translational acceleration
+        trans_accel_true = np.diff(self.trans_vel_true, axis=0) / dt[:, None]
+        trans_accel_cmd = np.diff(self.trans_vel_cmd, axis=0) / dt[:, None]
+        
+        # Compute rotational acceleration
+        rot_accel_true = np.diff(self.rot_vel_true, axis=0) / dt[:, None]
+        rot_accel_cmd = np.diff(self.rot_vel_cmd, axis=0) / dt[:, None]
+        
+        # Compute jerk (derivative of acceleration)
+        trans_jerk_true = np.diff(trans_accel_true, axis=0) / dt[:-1, None]
+        trans_jerk_cmd = np.diff(trans_accel_cmd, axis=0) / dt[:-1, None]
+        
+        rot_jerk_true = np.diff(rot_accel_true, axis=0) / dt[:-1, None]
+        rot_jerk_cmd = np.diff(rot_accel_cmd, axis=0) / dt[:-1, None]
+        
+        # Modified time vectors
+        accel_time = self.time[:-1]  # One step shorter than time
+        jerk_time = self.time[:-2]   # Two steps shorter than time
+        
+        return {
+            "accel_time": accel_time,
+            "trans_accel_true": trans_accel_true,
+            "trans_accel_cmd": trans_accel_cmd,
+            "rot_accel_true": rot_accel_true,
+            "rot_accel_cmd": rot_accel_cmd,
+            "jerk_time": jerk_time,
+            "trans_jerk_true": trans_jerk_true,
+            "trans_jerk_cmd": trans_jerk_cmd,
+            "rot_jerk_true": rot_jerk_true,
+            "rot_jerk_cmd": rot_jerk_cmd,
+        }
 
 
 def read_from_csv(filepath):
@@ -524,7 +559,9 @@ class BlizzardController(nn.Module):
 
     
 def plot_run(sim_run: SimObjectOutput):
-    pass
+    position_plot(sim_run)
+    loss_plot(sim_run)
+    attitude_plot(sim_run)
 
 def position_plot(sim_run: SimObjectOutput, output_dir="data/results/object_position"):
 
@@ -1163,7 +1200,7 @@ def blizzard_attitude_stabilization_setup(name="attitude_test"):
     # print(object_list)
     object_list = [blizzard_instance]
 
-    return Scenario(scenario_name=name, end_time=15.0, min_dt=0.001, objects=object_list, environments=environments)
+    return Scenario(scenario_name=name, end_time=60.0, min_dt=0.001, objects=object_list, environments=environments)
 
 def blizzard_return_to_zero(name="displacement_test"): 
     
@@ -1187,7 +1224,7 @@ def blizzard_return_to_zero(name="displacement_test"):
     # print(object_list)
     object_list = [blizzard_instance]
 
-    return Scenario(scenario_name=name, end_time=15.0, min_dt=0.001, objects=object_list, environments=environments)
+    return Scenario(scenario_name=name, end_time=60.0, min_dt=0.001, objects=object_list, environments=environments)
 
 
 def nn_train_att_1():
@@ -1585,6 +1622,7 @@ def get_data_from_sim_run_list(sim_runs):
             states = np.concatenate([states, next_state_local], axis=0)
             next_states = np.concatenate([next_states, state_local], axis=0)
             actions = np.concatenate([actions, actions_local], axis=0)
+    print(states.shape)
     return states, next_states, actions
 
 if __name__ == "__main__":
