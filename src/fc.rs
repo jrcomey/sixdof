@@ -219,11 +219,18 @@ pub trait NavComputer {
     // fn 
 }
 
+// #####################
+
+// GUIDANCE COMPUTERS
+
+/// Trait for Guidance Computers. 
+/// Needs to be able calculate the target position and report current held position for logging
 pub trait GuidanceComputer {
     fn calculate_guidance(&mut self, t: &f64, estimated_state: &State) -> State;
     fn get_cmd_position(&self) -> State;
 }
 
+/// Basic guidance based on waypoints switched at set times
 pub struct TimingGuidanceComputer {
     t: f64,
     i: usize,
@@ -337,6 +344,51 @@ impl GuidanceComputer for ZeroGuidance {
     }
 }
 
+pub enum PathfindingMethod {
+    Direct,
+}
+/// Struct for positional waypoint following computer
 pub struct WaypointGuidanceComputer {
+    t: f64,
+    i: usize,
+    current_target_state: State,
+    waypoints: Vec<na::SMatrix<f64, 3, 1>>,
+    method: PathfindingMethod,
+    position_tolerance: f64,
+    hold_time: f64,
+    time_in_position: f64,
+}
 
+impl GuidanceComputer for WaypointGuidanceComputer {
+    fn calculate_guidance(&mut self, t: &f64, estimated_state: &State) -> State {
+
+        // Convert to point, calculate error, find scalar distance to current target point
+        let current_position = na::SMatrix::<f64, 3, 1>::from_row_slice(&[
+            estimated_state[0], estimated_state[1], estimated_state[2]
+        ]);
+        let error: f64 = (self.waypoints[self.i] - current_position).magnitude();
+        
+        // Check to see if position is within tolerance, then hold for a set time. Once done, continue to next waypoint
+        // Only continue if it isn't the last one
+        if error < self.position_tolerance {
+            let dt = t - self.t;
+            self.time_in_position += dt;
+            if self.time_in_position > self.hold_time && self.i != self.waypoints.len()-1 {
+                self.i += 1;
+                let mut target_state = State::zeros();
+                target_state[0] = self.waypoints[self.i][0];    // Optimize!
+                target_state[1] = self.waypoints[self.i][1];    
+                target_state[2] = self.waypoints[self.i][2];
+
+                self.current_target_state = target_state;
+            }
+        }
+        else {
+            self.time_in_position = 0.0;
+        }
+        return self.current_target_state;
+    }
+    fn get_cmd_position(&self) -> State {
+        return self.current_target_state
+    }
 }
