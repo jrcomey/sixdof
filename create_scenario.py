@@ -148,7 +148,7 @@ class IdealThruster(Component):
 
 class FlightComputer:
 
-    def __init__(self, sample_time, sensors, K):
+    def __init__(self, sample_time, sensors, K, guidance_computer=None):
 
         self.sample_time = sample_time
         self.K = K
@@ -159,6 +159,8 @@ class FlightComputer:
             self.fcType = "NeuralNet"
         else:
             self.fcType = ""
+
+        self.guidance_computer = guidance_computer
 
     def set_NN_filepath(self, filepath):
         self.NN_filepath = filepath
@@ -192,12 +194,35 @@ class FlightComputer:
             "sample_time": self.sample_time,
             "K": sum(self.K.tolist(), [])
         }
+            
+        if self.guidance_computer is None:
+            # data["guidanceComputer"] = "Zero"
+            data["guidanceType"] = "Zero"
+        elif isinstance(self.guidance_computer, TimingGuidanceComputer):
+            data["guidanceType"] = "TimingGuidance"
+            data["guidanceComputer"] = self.guidance_computer.create_json_dict()
         return data
     
     def to_json_str(self):
         return json.dumps(self.create_json_dict())
 
-        
+    def add_guidance_system(self, new_guidance):
+        self.guidance_computer = new_guidance
+
+class TimingGuidanceComputer:
+
+    def __init__(self, times=[0], states=[np.ndarray]):
+        self.times = times
+        self.states = states
+
+    def create_json_dict(self):
+        data = {
+            "transitionTimes": self.times,
+            "targetStates": [sum(state.tolist(), []) for state in self.states],
+        }
+        return data
+
+
 class SimObject:
 
     def __init__(self, name="", mass=0.0, I = np.array([[0.0, 0.0, 0.0],[0,0,0],[0,0,0]]), *,
@@ -561,7 +586,59 @@ class BlizzardController(nn.Module):
 def plot_run(sim_run: SimObjectOutput):
     position_plot(sim_run)
     loss_plot(sim_run)
+    reward_plot(sim_run)
     attitude_plot(sim_run)
+    velocity_plot(sim_run)
+    acceleration_plot(sim_run)
+    jerk_plot(sim_run)
+
+def jerk_plot(sim_run: SimObjectOutput, output_dir="data/results/object"):
+    acc_vals = sim_run.compute_acceleration()
+    meters = mpl.ticker.EngFormatter("m")
+    newtons = mpl.ticker.EngFormatter("N")
+    seconds = mpl.ticker.EngFormatter("s")
+    radians = mpl.ticker.EngFormatter("rad")
+    time = acc_vals["jerk_time"]
+    obj_x = acc_vals["trans_jerk_true"][:,0]
+    obj_y = acc_vals["trans_jerk_true"][:,1]
+    obj_z = acc_vals["trans_jerk_true"][:,2]
+
+    fig, accplot = plt.subplots()
+    plothusly(accplot, time, obj_z, 
+            xtitle="Time [sec]",
+            ytitle="Jerk [m/s^3]", 
+            datalabel="Z Jerk", 
+            title="Sim Obj Jerk")
+    plothus(accplot, time, obj_y, datalabel="Y Jerk")
+    plothus(accplot, time, obj_x, datalabel="X Jerk")
+
+    accplot.xaxis.set_major_formatter(seconds)
+    accplot.yaxis.set_major_formatter(meters)
+
+    fig.savefig(f"{output_dir}_jrk.png")
+
+def acceleration_plot(sim_run: SimObjectOutput, output_dir="data/results/object"):
+    acc_vals = sim_run.compute_acceleration()
+    mps2 = mpl.ticker.EngFormatter("m/s^2")
+    seconds = mpl.ticker.EngFormatter("s")
+    time = acc_vals["accel_time"]
+    obj_x = acc_vals["trans_accel_true"][:,0]
+    obj_y = acc_vals["trans_accel_true"][:,1]
+    obj_z = acc_vals["trans_accel_true"][:,2]
+
+    fig, accplot = plt.subplots()
+    plothusly(accplot, time, obj_z, 
+            xtitle="Time [sec]",
+            ytitle="Acceleration [m/s^2]", 
+            datalabel="Z Acceleration", 
+            title="Sim Obj Acceleration")
+    plothus(accplot, time, obj_y, datalabel="Y Acceleration")
+    plothus(accplot, time, obj_x, datalabel="X Acceleration")
+
+    accplot.xaxis.set_major_formatter(seconds)
+    accplot.yaxis.set_major_formatter(mps2)
+
+    fig.savefig(f"{output_dir}_acc.png")
 
 def position_plot(sim_run: SimObjectOutput, output_dir="data/results/object_position"):
 
@@ -574,6 +651,8 @@ def position_plot(sim_run: SimObjectOutput, output_dir="data/results/object_posi
     obj_y = sim_run.trans_true[:,1]
     obj_z = sim_run.trans_true[:,2]
 
+    cmd_x, cmd_y, cmd_z = sim_run.trans_cmd[:,0], sim_run.trans_cmd[:,1], sim_run.trans_cmd[:,2],
+
     fig, zplot = plt.subplots()
     plothusly(zplot, time, obj_z, 
             xtitle="Time [sec]",
@@ -583,10 +662,40 @@ def position_plot(sim_run: SimObjectOutput, output_dir="data/results/object_posi
     plothus(zplot, time, obj_y, datalabel="Y Position")
     plothus(zplot, time, obj_x, datalabel="X Position")
 
+    plothus(zplot, time, cmd_z, datalabel="Z Command", linestyle='--')
+    plothus(zplot, time, cmd_x, datalabel="X Command", linestyle='--')
+    plothus(zplot, time, cmd_y, datalabel="Y Command", linestyle='--')
+
     zplot.xaxis.set_major_formatter(seconds)
     zplot.yaxis.set_major_formatter(meters)
 
     fig.savefig(f"{output_dir}_pos.png")
+
+def velocity_plot(sim_run: SimObjectOutput, output_dir="data/results/object"):
+
+    meters = mpl.ticker.EngFormatter("m")
+    newtons = mpl.ticker.EngFormatter("N")
+    seconds = mpl.ticker.EngFormatter("s")
+    radians = mpl.ticker.EngFormatter("rad")
+    mps = mpl.ticker.EngFormatter("m/s")
+    time = sim_run.time
+    obj_x = sim_run.trans_vel_true[:,0]
+    obj_y = sim_run.trans_vel_true[:,1]
+    obj_z = sim_run.trans_vel_true[:,2]
+
+    fig, zplot = plt.subplots()
+    plothusly(zplot, time, obj_z, 
+            xtitle="Time [sec]",
+            ytitle="Position [m]]", 
+            datalabel="Z Velocity", 
+            title="Sim Obj Position")
+    plothus(zplot, time, obj_y, datalabel="Y Velocity")
+    plothus(zplot, time, obj_x, datalabel="X Velocity")
+
+    zplot.xaxis.set_major_formatter(seconds)
+    zplot.yaxis.set_major_formatter(mps)
+
+    fig.savefig(f"{output_dir}_vel.png")
 
 def loss_plot(sim_run: SimObjectOutput, output_dir="data/results/object"):
     seconds = mpl.ticker.EngFormatter("s")
@@ -1030,7 +1139,7 @@ def blizzard_test_object_setup(fc=None):
     components = []
     for position in rotor_positions:
         components.append(
-            IdealThruster(time_constant=0.01,
+            IdealThruster(time_constant=0.8,
                           position=np.array([position])
                           )
         )
@@ -1165,10 +1274,13 @@ def blizzard_hover_scenario_setup(name="blizzard_hover_test"):
         # PointMassGravity(mass=5.97219E24, position=np.array([0.0, 0.0, -6.378E6]))
     ]
 
+    init_state = np.zeros((12,1))
+    init_state[2]=-10
+
     blizzard_instance = Object_Instance(
         "blizzard",
-        np.zeros((12,1)),
-        "ForwardEuler",
+        init_state,
+        "RK4",
         8,
     )
 
@@ -1226,7 +1338,6 @@ def blizzard_return_to_zero(name="displacement_test"):
 
     return Scenario(scenario_name=name, end_time=60.0, min_dt=0.001, objects=object_list, environments=environments)
 
-
 def nn_train_att_1():
     repeat_job = Job()
 
@@ -1266,7 +1377,15 @@ def load_all_simulation_runs(output_path):
 def basic_job():
     job = Job()
 
-    job.add_object(blizzard_test_object_setup())
+    fc=FlightComputer(
+            sample_time=0.001,
+            sensors=[],
+            # K=K,
+            K = np.zeros((12,8))
+        )
+    job.add_object(blizzard_test_object_setup(
+        # fc
+    ))
 
     mixer = np.array([[0, 0, 0, 0, 0, 0, 0, 0],  # Empty
                   [0, 0, 0, 0, 0, 0, 0, 0],  # Empty
@@ -1291,13 +1410,6 @@ def basic_job():
     
     K = mixer.transpose() @ -K
 
-    fc=FlightComputer(
-            sample_time=0.001,
-            sensors=[],
-            K=K,
-            # K = np.zeros((12,4))
-        )
-
     job.add_scenario(blizzard_hover_scenario_setup())
     [job.add_scenario(blizzard_attitude_stabilization_setup(f"attitude_test_{i}")) for i in range(RUN_NUMS)]
     [job.add_scenario(blizzard_return_to_zero(f"displacemnet_test_{i}")) for i in range(RUN_NUMS)]
@@ -1320,6 +1432,8 @@ def calculate_loss(sim_run: SimObjectOutput):
 def calculate_reward_vector(sim_run: SimObjectOutput):
     reward = np.zeros_like(sim_run.time)
     reward += calculate_relevant_velocity_reward(sim_run)
+    reward += calculate_relevant_acceleration_reward(sim_run)
+    reward += calculate_relevant_jerk_reward(sim_run)
     reward += calculate_position_reward(sim_run)
     reward += calculate_rotation_reward(sim_run)
     reward += calculate_relevant_rotation_velocity_reward(sim_run)
@@ -1335,8 +1449,6 @@ def reward_plot(sim_run: SimObjectOutput, output_dir='data/results/object'):
             ytitle="Position [m]]", 
             datalabel="Z Position", 
             title="Sim Obj Reward")
-    # plothus(zplot, time, obj_y, datalabel="Y Position")
-    # plothus(zplot, time, obj_x, datalabel="X Position")
 
     zplot.xaxis.set_major_formatter(seconds)
     fig.savefig(f"{output_dir}_reward.png")
@@ -1378,9 +1490,42 @@ def calculate_relevant_velocity_reward(sim_run: SimObjectOutput):
     dt = np.abs(sim_run.time[1]-sim_run.time[0])
     err = sim_run.trans_cmd - sim_run.trans_true
     reward = np.array(
-        [np.linalg.norm(err_point)*np.dot(vel_true, err_point) for vel_true, err_point in zip(sim_run.trans_vel_true, err)]
+        [np.linalg.norm(err_point)*np.dot(vel_true, err_point) 
+         + 100*np.exp(-np.linalg.norm(vel_true)*np.exp(-np.linalg.norm(err_point))) for vel_true, err_point in zip(sim_run.trans_vel_true, err)]
         )
-    
+    reward = np.max([np.zeros_like(reward), reward], axis=0)
+    reward = np.min([100*np.ones_like(reward), reward], axis=0)
+    return reward
+
+def calculate_relevant_acceleration_reward(sim_run: SimObjectOutput):
+    calculated_info = sim_run.compute_acceleration()
+
+    accel_vec = np.concatenate([
+        np.zeros((1,3)), calculated_info["trans_accel_true"]
+    ])
+    err = sim_run.trans_cmd - sim_run.trans_true
+    reward = np.array(
+        [np.linalg.norm(err_point)*np.dot(acc_true, err_point)
+         + 100*np.exp(-np.linalg.norm(acc_true)*np.exp(-10*np.linalg.norm(err_point))) for acc_true, err_point in zip(accel_vec, err)]
+        )   
+    reward = np.max([np.zeros_like(reward), reward], axis=0)
+    reward = np.min([10*np.ones_like(reward), reward], axis=0)
+    return reward
+
+def calculate_relevant_jerk_reward(sim_run: SimObjectOutput):
+    calculated_info = sim_run.compute_acceleration()
+
+    jerk_vec = np.concatenate([
+        np.zeros((3,3)), calculated_info["trans_jerk_true"]
+    ])
+    # print(calculated_info["trans_jerk_true"])
+    err = sim_run.trans_cmd - sim_run.trans_true
+    reward = np.array(
+        [np.linalg.norm(err_point)*np.dot(jerk_true, err_point)
+         + 0.001*np.exp(-np.linalg.norm(jerk_true)*np.exp(-1*np.linalg.norm(err_point))) for jerk_true, err_point in zip(jerk_vec, err)]
+        )   
+    reward = np.max([np.zeros_like(reward), reward], axis=0)
+    reward = np.min([10*np.ones_like(reward), reward], axis=0)
     return reward
 
 def calculate_relevant_rotation_velocity_reward(sim_run: SimObjectOutput):
@@ -1622,16 +1767,39 @@ def get_data_from_sim_run_list(sim_runs):
             states = np.concatenate([states, next_state_local], axis=0)
             next_states = np.concatenate([next_states, state_local], axis=0)
             actions = np.concatenate([actions, actions_local], axis=0)
-    print(states.shape)
+    # print(states.shape)
     return states, next_states, actions
 
+def timing_guidance_computer_test():
+    times = [0, 15, 30]
+    step = np.zeros((12,1))
+    step[2]=10.0
+    states = [
+        np.zeros((12,1)),
+        step,
+        np.zeros((12,1))
+    ]
+    guidance = TimingGuidanceComputer(times, states)
+    job = Job()
+    job.add_object(
+        blizzard_test_object_setup()
+    )
+    job.objects[0].fc.add_guidance_system(guidance)
+    job.add_scenario(blizzard_hover_scenario_setup())
+    job.scenarios[0].end_time=60
+    return job
+
+
+
 if __name__ == "__main__":
-    primer_job = basic_job()
+    primer_job = timing_guidance_computer_test()
     primer_job.export_job()
     # print(primer_job.path)
     sim_data_vector = call_sim()
 
-    job = nn_att_2()
+    plot_run(read_from_csv("/home/jack/Documents/Projects/sixdof/data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv"))
+
+    # job = nn_att_2()
 
     # # sim_data = read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv")
     # # print(job.objects[0].fc.K.parameters())
@@ -1642,5 +1810,5 @@ if __name__ == "__main__":
     # position_plot(sim_data)
     # loss_plot(sim_data)
     # reward_plot(sim_data)
-    optimizer = torch.optim.Adam(job.objects[0].fc.K.parameters(), lr=LR)
-    optimize_model(job, sim_data_vector, job.objects[0].fc.K, optimizer, num_epochs=100, batch_size=1256, pretraining_epochs=300)
+    # optimizer = torch.optim.Adam(job.objects[0].fc.K.parameters(), lr=LR)
+    # optimize_model(job, sim_data_vector, job.objects[0].fc.K, optimizer, num_epochs=100, batch_size=1256, pretraining_epochs=300)
