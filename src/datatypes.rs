@@ -22,6 +22,7 @@ pub fn limit_value_symmetric(value: f64, max_magnitude: f64) -> f64 {
     }
 }
 
+/// Function to limit values between an upper and lower limit
 pub fn limit_value(value: f64, upper_limit: f64, lower_limit:f64) -> f64 {
     if value > upper_limit {
         upper_limit
@@ -32,6 +33,7 @@ pub fn limit_value(value: f64, upper_limit: f64, lower_limit:f64) -> f64 {
     }
 }
 
+/// Function to provide a rotation frame. Transpose is the inverse.
 pub fn rotation_frame(phi: &f64, theta: &f64, psi: &f64) -> SMatrix<f64, 12, 12> {
 
     let mut R_big = SMatrix::<f64, 12, 12>::zeros();

@@ -179,6 +179,7 @@ enum IgnitionStatus {
 
 // ###################
 
+/// An ideal first-order thruster
 pub struct IdealThruster {
     time_const: f64,
     force: f64,
@@ -193,6 +194,7 @@ pub struct IdealThruster {
 
 impl IdealThruster {
 
+    /// Create a new thruster
     pub fn new() -> Self {
         IdealThruster {
             time_const: 0.0001,
@@ -206,6 +208,7 @@ impl IdealThruster {
         }
     }
 
+    /// Set the setpoint target force for the thruster
     pub fn set_force(&mut self, new_force: f64) {
         self.set_force = new_force;
     }
@@ -214,14 +217,17 @@ impl IdealThruster {
         return (na::SMatrix::<f64, 1, 1>::new(self.force) - y)/self.time_const;
     }
 
+    /// Change the thruster time constant
     pub fn set_time_const(&mut self, new_time_const: f64) {
         self.time_const = new_time_const;
     }
 
+    /// Get the force currently produced by the thruster
     pub fn get_force(&self) -> f64 {
         self.force
     }
 
+    /// Load a thruster from a JSON file.
     pub fn load_from_json_parsed(json_parsed: Value) -> Self {
 
         let time_const = json_parsed["time_constant"].as_f64().unwrap();

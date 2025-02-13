@@ -10,6 +10,7 @@ use serde_json;
 /// Universal gravitational constant. 
 const GRAV_CONST_UNIV: f64 = 6.67430E-11; // N*m^2/ kg^2
 
+/// Physics object with a 
 pub struct OrbitalBody {
     grav_field: GravitationalField,
     atmosphere: Option<Atmosphere>,
@@ -26,6 +27,7 @@ impl Default for OrbitalBody {
     }
 }
 
+/// Placeholder struct for an atmosphere
 pub struct Atmosphere {
     atmosphere: u64,
 }   
@@ -144,7 +146,7 @@ impl Default for GravitationalField {
 
 
 
-
+/// Calculate change in acceleration on object
 pub trait EnviromentalEffect {
     fn calculate_acceleration_on_object(&self, vehicle_mass: &f64, vehicle_position: &na::Point3<f64>) -> State;
 }

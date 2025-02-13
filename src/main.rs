@@ -55,14 +55,9 @@ extern crate tract_onnx;
 // use tract_ndarray::Array;
 fn main() -> Result<(), std::io::Error> {
     let t_start = std::time::Instant::now();
-    std::env::set_var("RUST_LOG", "sixdof=warn,warn cargo run");                                 // Initialize logger
+    std::env::set_var("RUST_LOG", "sixdof=trace,warn cargo run");                                 // Initialize logger
     pretty_env_logger::init();
     info!("Program Start!");
-
-    // let model = tract_onnx::onnx()
-    //     .model_for_path("model.onnx").unwrap()
-    //     .into_optimized().unwrap()
-    //     .into_runnable().unwrap();
 
     sixdof::Sim::load_and_run_job("data/todo").unwrap();
 
@@ -262,6 +257,7 @@ mod tests {
     }
 
     #[test]
+    ///
     fn rotate_transpose() {
         let R = rotation_frame(&0.0, &0.0, &(std::f64::consts::PI*0.5));
         let mut init_state = State::zeros();
@@ -273,6 +269,7 @@ mod tests {
 
 }
 
+/// Linspace function
 fn linspace(start: f64, end: f64, num_points: usize) -> Vec<f64> {
     let step = (end - start) / (num_points as f64 - 1.0);
     (0..num_points)

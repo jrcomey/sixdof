@@ -1,7 +1,7 @@
 use crate::graphical::GraphicalData;
 use crate::sixdof::{self, *};
 use crate::{components, datatypes::{self, *}};
-use crate::fc::*;
+use crate::fc::{self, *};
 use crate::components::*;
 
 pub fn test_falling_object() -> Box<sixdof::Vehicle<8>> {
@@ -119,7 +119,8 @@ pub fn non_falling_obect() -> Box<sixdof::Vehicle<1>> {
         vec![], 
         na::SMatrix::<f64, 1, 12>::from_row_slice(&[
             0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            ])
+            ]),
+        Box::new(fc::ZeroGuidance::new())
     );
     drone.add_flight_controller(Box::new(flight_computer));
 
@@ -195,7 +196,7 @@ pub fn blizzard_model() -> Box<sixdof::Vehicle<12>> {
 
     // let K = na::SMatrix::<f64, 12, 12>::zeros();
 
-    let fc = FlightComputer::<12>::new(1E-9, vec![], K);
+    let fc = FlightComputer::<12>::new(1E-9, vec![], K, Box::new(fc::ZeroGuidance::new()));
     blizzard.add_flight_controller(Box::new(fc));
  
     return Box::new(blizzard);

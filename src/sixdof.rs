@@ -15,6 +15,7 @@ use nalgebra as na;
 use serde::de::value;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
+use tract_onnx::prelude::tract_itertools::enumerate;
 use crate::datatypes::{rotation_frame, Inputs, State, GRAPHICAL_SCALING_FACTOR};
 use crate::{environments, fc::*};
 use std::net::TcpStream;
@@ -566,8 +567,10 @@ pub trait Simulatable {
     fn combine_csv_files(&self) -> std::io::Result<()>;
 }
 
+/// Atomic counter for enforcing unique object IDs
 static OBJECT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Struct for dynamic controllable physics objects in the sim. Has an integrator, state space matricies, and flight computer.
 pub struct Vehicle<const U: usize> {
     name: String,
     id: u64,
@@ -635,7 +638,7 @@ impl<const U: usize> Vehicle<U> {
     }
 
     pub fn calculate_and_update_u(&mut self, t: f64, current_state: State) {
-        let u_cmd = self.fc.calculate_u(current_state);
+        let u_cmd = self.fc.calculate_u(t, current_state);
         let mut i=0;
         for motor in &mut self.motors {
             motor.set_force(u_cmd[i]);
@@ -1261,25 +1264,25 @@ fn z_acc_down() -> State {
     ])
 }
 
-fn forward_matrix(dt: f64) -> SMatrix<f64, 12, 12> {
-    na::SMatrix::<f64, 12, 12>::from_row_slice(&[
-        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+// fn forward_matrix(dt: f64) -> SMatrix<f64, 12, 12> {
+//     na::SMatrix::<f64, 12, 12>::from_row_slice(&[
+//         0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
 
-        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
-    ])
-}
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+//     ])
+// }
 
 
 // #####################
@@ -1333,6 +1336,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             self.cmd_vector.push(cmd_state);
             self.input_vector.push(input);
             self.last_time = time;
+            // debug!("Last Command: {}", self.cmd_vector[self.cmd_vector.len()-1]);
             
             // Push data to file if it exceeds the maximum steps parameter
             // Only needs to be done if recording a step. Purge afterwards
@@ -1370,11 +1374,12 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             }
         }
         csv.push_str("\n");
-        
+
 
         // Iterate over all datapoints
         for (i, _) in self.time_vector.iter().enumerate() {
             let mut local_str = "".to_string();
+            // debug!("Command Vectors: {}", &self.state_vector[i]);
             local_str = local_str + &format!("{:?}", self.time_vector[i]); // Time
             for state_el in (&self.state_vector[i]).into_iter() {
                 local_str.push_str(&format!(",{:?}", state_el));
@@ -1382,6 +1387,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
             for cmd_el in (&self.cmd_vector[i]).into_iter() {
                 local_str.push_str(&format!(",{:?}", cmd_el));
             }
+            // debug!("{}", &self.cmd_vector[i]);
             if U > 1 {
                 for input in (&self.input_vector[i]).into_iter() {
                     local_str.push_str(&format!(",{:?}", input));
@@ -1400,6 +1406,7 @@ impl<const S: usize, const U:usize> DataLogger<S, U> {
         self.time_vector = vec![];
         self.state_vector = vec![];
         self.input_vector = vec![];
+        self.cmd_vector = vec![];
         self.num_refresh = self.num_refresh + 1;
  
     }

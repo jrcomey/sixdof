@@ -1,5 +1,6 @@
 use sj::{json, Value};
 
+/// Struct for containing graphical data
 pub struct GraphicalData {
     pub name: String,
     pub filepath: String,
@@ -25,6 +26,7 @@ impl Default for GraphicalData {
 }
 
 impl GraphicalData {
+    /// Create new graphical struct
     pub fn new(name: &str, filepath: &str, color: [f64; 4]) -> Self {
         GraphicalData {
             name: name.to_string(),
@@ -34,6 +36,7 @@ impl GraphicalData {
         }
     }
 
+    /// Load a graphical struct from JSON
     pub fn from_json(json_file: &Value) -> Self {
         let name = json_file["Name"].as_str().unwrap();
         let object_file_path = json_file["ObjectFilePath"].as_str().unwrap();
@@ -83,6 +86,7 @@ impl GraphicalData {
 
     }
 
+    /// Return model as a JSON Value struct
     pub fn get_model_value(&self) -> Value {
         json!({
             "Name": self.name,
@@ -95,10 +99,12 @@ impl GraphicalData {
         })
     }
 
+    /// Get filepath of the model
     pub fn get_model_path(&self) -> &str {
         &self.filepath
     }
 
+    /// Set model scale
     pub fn set_scale(&mut self, new_scale: [f64; 3]) {
         self.scale=new_scale;
         debug!("New Scale: {}", self.scale[0]);
