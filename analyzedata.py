@@ -7,8 +7,6 @@ import os
 from collections import defaultdict
 import re
 from dataclasses import dataclass
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # import seaborn as sns
 object_name = "drone"

@@ -58,6 +58,9 @@ impl<const U: usize> FlightComputer<U> {
             "TimingGuidance" => {
                 Box::new(TimingGuidanceComputer::load_from_json(json_parsed["guidanceComputer"].clone()))
             },
+            "WaypointGuidance" => {
+                Box::new(WaypointGuidanceComputer::load_from_json(json_parsed["guidanceComputer"].clone()))
+            }
             _ => {
                 Box::new(ZeroGuidance::new())
             }
@@ -359,6 +362,56 @@ pub struct WaypointGuidanceComputer {
     time_in_position: f64,
 }
 
+impl WaypointGuidanceComputer {
+    fn new() -> Self {
+        todo!()
+    }
+    fn load_from_json(json_parsed: Value) -> Self{
+        let mut waypoints: Vec<na::SMatrix<f64, 3, 1>> = match &json_parsed["waypoints"] {
+            Value::Array(data_vector) => {
+                let mut states = vec![];
+                for data in data_vector{
+                    let x_dat: Vec<f64> = data
+                        .as_array()
+                        .unwrap()
+                        .into_iter()
+                        .map(|x| x.as_f64().unwrap())
+                        .collect();
+                    let x: na::SMatrix<f64, 3, 1> = na::SMatrix::from_row_slice(&x_dat[..]);
+                    states.push(x);
+                }
+                states
+            },
+            _ => {
+                warn!("Tried to load waypoints but failed");
+                vec![na::SMatrix::<f64, 3, 1>::zeros()]
+            }
+        };
+
+        let position_tolerance: f64 = json_parsed["tolerance"]
+        .as_f64()
+        .unwrap();
+
+        let hold_time: f64 = json_parsed["holdTime"].as_f64().unwrap();
+
+        let mut current_target_state = State::zeros();
+        current_target_state[0] = waypoints[0][0];
+        current_target_state[1] = waypoints[0][1];
+        current_target_state[2] = waypoints[0][1];
+
+        WaypointGuidanceComputer {
+            t: 0.0,
+            i: 0,
+            current_target_state: current_target_state,
+            waypoints: waypoints,
+            method: PathfindingMethod::Direct,
+            position_tolerance: position_tolerance,
+            hold_time: hold_time,
+            time_in_position: 0.0
+        }
+    }
+}
+
 impl GuidanceComputer for WaypointGuidanceComputer {
     fn calculate_guidance(&mut self, t: &f64, estimated_state: &State) -> State {
 
@@ -392,3 +445,9 @@ impl GuidanceComputer for WaypointGuidanceComputer {
         return self.current_target_state
     }
 }
+
+// impl Default for WaypointGuidanceComputer {
+//     fn default() -> Self {
+//         Wa
+//     }
+// }

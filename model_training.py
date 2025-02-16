@@ -73,18 +73,22 @@ def train_from_example_K(job, model, optimizer, training_data: [SimObjectOutput]
         avg_loss = total_loss / n_batches
         print(f"Epoch {epoch + 1}/{num_epochs}: Average Loss = {avg_loss:,.4f}")
 
-        
+def train_PPO_strategy():
+    pass
 
 if __name__ == "__main__":
-    primer_job = basic_job()
+    primer_job = step_response_timing_test()
     primer_job.export_job()
-    # sim_data_vector = call_sim()
-    sim_data_vector = load_all_simulation_runs("data/todo/default_name/output")
+    sim_data_vector = call_sim()
+
+    plot_run(read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv"))
+    # sim_data_vector = load_all_simulation_runs("data/todo/default_name/output")
     model = RLController(12, 500, 8)
     fc = FlightComputer(0.001, [], model)
-    job = nn_att_2(fc)
+    job = step_response_timing_test(fc=fc)
+    job.objects[0].fc.set_NN_filepath("data/todo/default_name/objects/blizzard/blizzard.onnx")
     job.export_job()
     params = job.objects[0].fc.K.network.parameters()
     optimizer = torch.optim.Adam(params, lr=1E-3)
-    # optimizer = torch.optim.SGD(params, lr=1E-5)
-    train_from_example_K(job, model, optimizer, sim_data_vector, num_epochs=50, batch_size=4096)
+    # # optimizer = torch.optim.SGD(params, lr=1E-5)
+    train_from_example_K(primer_job, model, optimizer, sim_data_vector, num_epochs=1000, batch_size=4096)
