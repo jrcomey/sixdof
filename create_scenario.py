@@ -201,6 +201,9 @@ class FlightComputer:
         elif isinstance(self.guidance_computer, TimingGuidanceComputer):
             data["guidanceType"] = "TimingGuidance"
             data["guidanceComputer"] = self.guidance_computer.create_json_dict()
+        elif isinstance(self.guidance_computer, WaypointGuidanceComputer):
+            data["guidanceType"] = "WaypointGuidance"
+            data["guidanceComputer"] = self.guidance_computer.create_json_dict()
         return data
     
     def to_json_str(self):
@@ -208,6 +211,7 @@ class FlightComputer:
 
     def add_guidance_system(self, new_guidance):
         self.guidance_computer = new_guidance
+
 
 class TimingGuidanceComputer:
 
@@ -221,6 +225,21 @@ class TimingGuidanceComputer:
             "targetStates": [sum(state.tolist(), []) for state in self.states],
         }
         return data
+
+
+class WaypointGuidanceComputer:
+
+    def __init__(self, waypoints: [np.ndarray], tolerance: float, hold_time: float):
+        self.waypoints = waypoints
+        self.tolerance = tolerance
+        self.hold_time = hold_time
+
+    def create_json_dict(self):
+        return {
+            "waypoints": [sum(state.tolist(), []) for state in self.waypoints],
+            "tolerance": self.tolerance,
+            "holdTime": self.hold_time,
+        }
 
 
 class SimObject:
@@ -315,6 +334,7 @@ class SimObject:
         with open(directory+f"/{self.name}.json", "w") as file:
             file.write(self.to_json_str())
 
+
 @dataclass
 class Object_Instance:
     object_name: str
@@ -403,6 +423,39 @@ class GraphicalElement:
             "Color": self.color,
             "Scale": self.scale,
         }
+
+class BlizzardController(nn.Module):
+    
+    def __init__(self, input_size=12, hidden_layer_size=256, output_size=8):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_layer_size, dtype=torch.float32),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, output_size, dtype=torch.float32),
+            nn.Tanh(),
+        )
+        # print(self.network)
+
+    def forward(self, x):
+        return self.network(x)
+
 
 @dataclass
 class SimObjectOutput:
@@ -550,37 +603,23 @@ def read_from_csv(filepath):
     
     return SimObjectOutput(time, state_true, state_cmd,trans_vel_true=trans_vel_true, trans_vel_cmd=trans_vel_cmd, rot_true=rot_true, rot_cmd=rot_cmd, rot_vel_true=rot_vel_true, rot_vel_cmd=rot_vel_cmd, states=full_state,u_vector=u_vec)
 
-class BlizzardController(nn.Module):
-    
-    def __init__(self, input_size=12, hidden_layer_size=256, output_size=8):
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_size, hidden_layer_size, dtype=torch.float32),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, hidden_layer_size, dtype=torch.float32),
-            nn.ReLU(),
-            nn.Linear(hidden_layer_size, output_size, dtype=torch.float32),
-            nn.Tanh(),
-        )
-        # print(self.network)
-
-    def forward(self, x):
-        return self.network(x)
+def amputate_run_data_to_t(sim_run: SimObjectOutput, t_cutoff: float):
+    index = np.where(sim_run.time > t_cutoff)[0]
+    print(sim_run.time[index])
+    print(sim_run.trans_true[index,:])    
+    return SimObjectOutput(
+        time = sim_run.time[index],
+        trans_true=sim_run.trans_true[index,:],
+        trans_cmd=sim_run.trans_cmd[index,:],
+        trans_vel_true=sim_run.trans_vel_true[index,:],
+        trans_vel_cmd=sim_run.trans_vel_cmd[index,:],
+        rot_true=sim_run.rot_true[index,:],
+        rot_cmd=sim_run.rot_cmd[index,:],
+        rot_vel_true=sim_run.rot_vel_true[index,:],
+        rot_vel_cmd=sim_run.rot_vel_cmd[index,:],
+        states=sim_run.states[index,:],
+        u_vector=sim_run.u_vector[index,:],
+    )
 
     
 def plot_run(sim_run: SimObjectOutput):
@@ -1158,22 +1197,6 @@ def blizzard_test_object_setup(fc=None):
                   [2.5, 2.5, -2.5, -2.5, 2.5, 2.5, -2.5, -2.5],  # Y Moments (Pitch)
                   [-1, 1, 1, -1, 1, -1, -1, 1]], dtype=float)  # Z Moments (Yaw)
     
-    # Override Mixer
-    # mixer = np.array([
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [1.0, 1.0, 1.0, 1.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [3.0, -3.0, 3.0, -3.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0],
-    # ])
-    
     I = np.array([[600, 0, 0],
               [0, 800, 0],
               [0, 0, 800]])
@@ -1203,21 +1226,6 @@ def blizzard_test_object_setup(fc=None):
 
     K[10,0] = 0.1*K[10,7]
     K[10,3] = 0.3*K[10,10]
-
-    # K = np.array([
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # x'
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # y'
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # z'
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # x''
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # y''
-    #                     [0, 0, -1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # z''
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # phi'
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # theta'
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # psi'
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # phi''
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],           # theta''
-    #                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],          # psi''
-    #                       dtype=float)
     
     K = mixer.transpose() @ -K
 
@@ -1308,8 +1316,6 @@ def blizzard_attitude_stabilization_setup(name="attitude_test"):
         8,
     )
 
-    # object_list = [blizzard_instance for i in range(RUN_NUMS)]
-    # print(object_list)
     object_list = [blizzard_instance]
 
     return Scenario(scenario_name=name, end_time=60.0, min_dt=0.001, objects=object_list, environments=environments)
@@ -1757,7 +1763,8 @@ def optimize_model(job: Job, sim_data_vector: [SimObjectOutput], model: nn.Modul
     
     return model
 
-def get_data_from_sim_run_list(sim_runs):
+def get_data_from_sim_run_list(sim_runs: [SimObjectOutput], t_cutoff=0.0):
+    new_sim_list = [amputate_run_data_to_t(sim_run, t_cutoff) for sim_run in sim_runs]
     states, next_states, actions = None,None,None
     for run in sim_runs:
         if states is None:
@@ -1789,16 +1796,75 @@ def timing_guidance_computer_test():
     job.scenarios[0].end_time=60
     return job
 
+def waypoint_guidance_computer_test():
+    points = [
+        np.zeros((3,1)),
+        np.ones((3,1)),
+        np.zeros((3,1)),
+        -np.ones((3,1)),
+        -10*np.ones((3,1)),
+        np.zeros((3,1)),
+        10*np.ones((3,1)),
+    ]
+    guidance = WaypointGuidanceComputer(points, tolerance=0.1, hold_time=2)
+    job = Job()
+    job.add_object(
+        blizzard_test_object_setup()
+    )
+    job.objects[0].fc.add_guidance_system(guidance)
+    job.add_scenario(blizzard_hover_scenario_setup())
+    job.scenarios[0].end_time=60
+    return job
 
+def step_response_timing_test(*, fc=None, t_step=5, mag_step=10):
+    times = [0, t_step, ]
+    step = np.zeros((12,1))
+    step[2]=mag_step
+    states = [
+        np.zeros((12,1)),
+        step,
+    ]
+    guidance = TimingGuidanceComputer(times, states)
+    job = Job()
+    job.add_object(
+        blizzard_test_object_setup(fc=fc)
+    )
+    job.objects[0].fc.add_guidance_system(guidance)
+    job.add_scenario(blizzard_hover_scenario_setup())
+    job.scenarios[0].end_time=60
+    return job
+
+
+def step_response_scenario(name="step_response_test", t_step=10, mag_step=5):
+    environments = [
+        ConstantField(),
+        # PointMassGravity(mass=5.97219E24, position=np.array([0.0, 0.0, -6.378E6]))
+    ]
+
+    init_state = np.zeros((12,1))
+    init_state[3:6] = np.random.rand(3,1) * math.pi
+    
+
+    blizzard_instance = Object_Instance(
+        "blizzard",
+        init_state,
+        "RK4",
+        8,
+    )
+    
+    object_list = [blizzard_instance]
+
+    return Scenario(scenario_name=name, end_time=60.0, min_dt=0.001, objects=object_list, environments=environments)
 
 if __name__ == "__main__":
-    primer_job = timing_guidance_computer_test()
+    primer_job = step_response_timing_test(t_step=25)
     primer_job.export_job()
     # print(primer_job.path)
     sim_data_vector = call_sim()
-
-    plot_run(read_from_csv("/home/jack/Documents/Projects/sixdof/data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv"))
-
+    
+    sim_run = read_from_csv("/home/jack/Documents/Projects/sixdof/data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv")
+    sim_run = amputate_run_data_to_t(sim_run, 10)
+    plot_run(sim_run)
     # job = nn_att_2()
 
     # # sim_data = read_from_csv("data/todo/default_name/output/blizzard_hover_test/object_0_blizzard.csv")
@@ -1811,4 +1877,4 @@ if __name__ == "__main__":
     # loss_plot(sim_data)
     # reward_plot(sim_data)
     # optimizer = torch.optim.Adam(job.objects[0].fc.K.parameters(), lr=LR)
-    # optimize_model(job, sim_data_vector, job.objects[0].fc.K, optimizer, num_epochs=100, batch_size=1256, pretraining_epochs=300)
+    optimize_model(job, sim_data_vector, job.objects[0].fc.K, optimizer, num_epochs=100, batch_size=1256, pretraining_epochs=300)

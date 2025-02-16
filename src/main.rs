@@ -257,7 +257,6 @@ mod tests {
     }
 
     #[test]
-    ///
     fn rotate_transpose() {
         let R = rotation_frame(&0.0, &0.0, &(std::f64::consts::PI*0.5));
         let mut init_state = State::zeros();

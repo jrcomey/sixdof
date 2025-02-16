@@ -58,6 +58,9 @@ impl<const U: usize> FlightComputer<U> {
             "TimingGuidance" => {
                 Box::new(TimingGuidanceComputer::load_from_json(json_parsed["guidanceComputer"].clone()))
             },
+            "WaypointGuidance" => {
+                Box::new(WaypointGuidanceComputer::load_from_json(json_parsed["guidanceComputer"].clone()))
+            }
             _ => {
                 Box::new(ZeroGuidance::new())
             }
@@ -219,11 +222,18 @@ pub trait NavComputer {
     // fn 
 }
 
+// #####################
+
+// GUIDANCE COMPUTERS
+
+/// Trait for Guidance Computers. 
+/// Needs to be able calculate the target position and report current held position for logging
 pub trait GuidanceComputer {
     fn calculate_guidance(&mut self, t: &f64, estimated_state: &State) -> State;
     fn get_cmd_position(&self) -> State;
 }
 
+/// Basic guidance based on waypoints switched at set times
 pub struct TimingGuidanceComputer {
     t: f64,
     i: usize,
@@ -337,6 +347,107 @@ impl GuidanceComputer for ZeroGuidance {
     }
 }
 
-pub struct WaypointGuidanceComputer {
-
+pub enum PathfindingMethod {
+    Direct,
 }
+/// Struct for positional waypoint following computer
+pub struct WaypointGuidanceComputer {
+    t: f64,
+    i: usize,
+    current_target_state: State,
+    waypoints: Vec<na::SMatrix<f64, 3, 1>>,
+    method: PathfindingMethod,
+    position_tolerance: f64,
+    hold_time: f64,
+    time_in_position: f64,
+}
+
+impl WaypointGuidanceComputer {
+    fn new() -> Self {
+        todo!()
+    }
+    fn load_from_json(json_parsed: Value) -> Self{
+        let mut waypoints: Vec<na::SMatrix<f64, 3, 1>> = match &json_parsed["waypoints"] {
+            Value::Array(data_vector) => {
+                let mut states = vec![];
+                for data in data_vector{
+                    let x_dat: Vec<f64> = data
+                        .as_array()
+                        .unwrap()
+                        .into_iter()
+                        .map(|x| x.as_f64().unwrap())
+                        .collect();
+                    let x: na::SMatrix<f64, 3, 1> = na::SMatrix::from_row_slice(&x_dat[..]);
+                    states.push(x);
+                }
+                states
+            },
+            _ => {
+                warn!("Tried to load waypoints but failed");
+                vec![na::SMatrix::<f64, 3, 1>::zeros()]
+            }
+        };
+
+        let position_tolerance: f64 = json_parsed["tolerance"]
+        .as_f64()
+        .unwrap();
+
+        let hold_time: f64 = json_parsed["holdTime"].as_f64().unwrap();
+
+        let mut current_target_state = State::zeros();
+        current_target_state[0] = waypoints[0][0];
+        current_target_state[1] = waypoints[0][1];
+        current_target_state[2] = waypoints[0][1];
+
+        WaypointGuidanceComputer {
+            t: 0.0,
+            i: 0,
+            current_target_state: current_target_state,
+            waypoints: waypoints,
+            method: PathfindingMethod::Direct,
+            position_tolerance: position_tolerance,
+            hold_time: hold_time,
+            time_in_position: 0.0
+        }
+    }
+}
+
+impl GuidanceComputer for WaypointGuidanceComputer {
+    fn calculate_guidance(&mut self, t: &f64, estimated_state: &State) -> State {
+
+        // Convert to point, calculate error, find scalar distance to current target point
+        let current_position = na::SMatrix::<f64, 3, 1>::from_row_slice(&[
+            estimated_state[0], estimated_state[1], estimated_state[2]
+        ]);
+        let error: f64 = (self.waypoints[self.i] - current_position).magnitude();
+        
+        // Check to see if position is within tolerance, then hold for a set time. Once done, continue to next waypoint
+        // Only continue if it isn't the last one
+        if error < self.position_tolerance {
+            let dt = t - self.t;
+            self.time_in_position += dt;
+            if self.time_in_position > self.hold_time && self.i != self.waypoints.len()-1 {
+                self.i += 1;
+                let mut target_state = State::zeros();
+                target_state[0] = self.waypoints[self.i][0];    // Optimize!
+                target_state[1] = self.waypoints[self.i][1];    
+                target_state[2] = self.waypoints[self.i][2];
+
+                self.current_target_state = target_state;
+            }
+        }
+        else {
+            self.time_in_position = 0.0;
+        }
+        return self.current_target_state;
+    }
+    fn get_cmd_position(&self) -> State {
+        return self.current_target_state
+    }
+}
+
+// impl Default for WaypointGuidanceComputer {
+//     fn default() -> Self {
+//         Wa
+//     }
+// }
