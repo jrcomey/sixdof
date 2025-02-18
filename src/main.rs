@@ -1,21 +1,14 @@
 /*  TODO:
     // Indicates completed
     - Flight Computer and electronics
-        - Basic stabilizing flight computer
         - Betaflight duplicate
         - 
     - Scenario Loading
-        - Load Environments (Empty Space, Gravity, Etc)
-        - Load Objects
         - Load Terrain (If Applicable)
     - Simulation Running
-        // - Skip static objects
         - Midpoint time steps for digital applications
-
     - Simulation capabilities
         - create functions to change rotation frames
-        - Datalogger should check if output folder is empty at sim start and clear it if not
-
 */
 
 #![allow(warnings)]
