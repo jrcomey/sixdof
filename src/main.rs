@@ -2,13 +2,27 @@
     // Indicates completed
     - Flight Computer and electronics
         - Betaflight duplicate
-        - 
     - Scenario Loading
         - Load Terrain (If Applicable)
     - Simulation Running
         - Midpoint time steps for digital applications
     - Simulation capabilities
         - create functions to change rotation frames
+        - Add static terrain as a seperate category
+    - Object Interactions
+        - simulated objects need a hitbox 
+        - Dynamic objects should have a simplified hitbox and terrain can use full hitbox
+        - Sensors (like lidar) should be able to hitscan terrain
+    - Flight Computer Capabilities
+        - Pathfinding Enum and capabilities
+        - Bubble guidance (create bubble around aircraft, target radius for position control)
+        - A* pathfinding algorithm
+    - Mapping
+        - Recreate Prof Gao's research on NeRF's for mapping capabilities
+        - Extend Prof Gao's research by using Gaussian Splatting for terrain mapping
+    - General fixes and improvments
+        - Rework functions to use error handling correctly (result types)
+        - 
 */
 
 #![allow(warnings)]
@@ -130,7 +144,7 @@ mod tests {
         sim.add_object(drone);
         let t = 10.0;
         sim.run_until(t);
-        let final_position = sim.get_object(0).get_position()[2];
+        let final_position = sim.get_object(0).unwrap().get_position()[2];
         let final_predicted = (1.0/2.0) * t*t * (-9.81);
 
         println!("Final Position: {}", final_position);
@@ -189,7 +203,7 @@ mod tests {
         sim.add_object(drone);
         let t = 10.0;
         sim.run_until(t);
-        let final_position = sim.get_object(0).get_position()[2];
+        let final_position = sim.get_object(0).unwrap().get_position()[2];
         let final_predicted = (1.0/2.0) * t*t * (-9.81);
 
         println!("Final Position: {}", final_position);
@@ -208,7 +222,7 @@ mod tests {
         sim.add_object(drone);
         let t = 10.0;
         sim.run_until(t);
-        let final_position = sim.get_object(0).get_position()[2];
+        let final_position = sim.get_object(0).unwrap().get_position()[2];
         let final_unassisted = (1.0/2.0) * t*t * (-9.81);
         trace!("Final Position: {}", final_position);
         trace!("Position with no input: {}", final_unassisted);

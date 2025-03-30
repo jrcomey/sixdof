@@ -91,8 +91,8 @@ impl Sim {
         self.end_time = end_time;
     }
     /// Returns a reference to object with given ID. No error handling yet
-    pub fn get_object(&mut self, id: usize) -> &mut Box<dyn Simulatable> {
-        &mut self.objects[id]
+    pub fn get_object(&mut self, id: usize) -> Option<&mut Box<dyn Simulatable>> {
+        self.objects.get_mut(id)
     }
 
     /// Exports current sim state to JSON. Unimplemented
@@ -388,10 +388,10 @@ impl Sim {
     pub fn datacom_update_packet(&mut self) -> String {
             let mut commands: Vec<Value> = vec![];
             for i in 0..self.objects.len(){
-                let temp = self.get_object(i).datacom_json_command_step();
-                match &temp {
-                    Some(Value) => {
-                        let mut temp2 = temp.expect("You shouldn't see this");
+                let temp = self.get_object(i);
+                match temp {
+                    Some(object) => {
+                        let mut temp2 = object.datacom_json_command_step().expect("You shouldn't see this");
                         commands.append(&mut temp2)},
                     _ => ()
                 }
@@ -491,10 +491,10 @@ impl Sim {
     /// Iterates over objects and gets unique model names
     pub fn get_unique_model_names(&mut self) -> Result<Vec<String>, Error> {
         let mut unique_model_paths: Vec<String> = vec![];
-        for i in 0..self.objects.len() {
-            let model_name = &self.get_object(i).get_model_path();
+        for object in &self.objects {
+            let model_name = object.get_model_path();
             
-            if unique_model_paths.iter().any(|e| model_name.contains(e)) && model_name == &"" {
+            if unique_model_paths.iter().any(|e| model_name.contains(e)) && model_name == "" {
                 debug!("{} already in model names", model_name);
             }
             else {
